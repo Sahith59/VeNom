@@ -35,6 +35,7 @@ tmp/
 
 # Internal working & design docs (kept local, not published to the public repo)
 PLAN.md
+TOKENS_PLAN.md
 CLAUDE.md
 PROJECT_BRIEF.md
 AGENT_SPECS.md

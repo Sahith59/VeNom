@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { text, select, isInteractive } from "./prompts.js";
 import { fillCharter } from "./charter.js";
 import { loadAdapter, detectTool, ADAPTERS } from "./tool.js";
+import { renderTokens } from "./tokens.js";
 import { bold, dim, cyan, green, yellow, red } from "./style.js";
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,6 +60,7 @@ ${bold("Usage")}
   venom init [options]      Install a team into the current project
   venom list                Show the available packs and roles
   venom add <role>          Add an optional role to an existing install
+  venom tokens [--pack <id>]  Estimate the token footprint + cost across models
   venom --version           Print the version
   venom --help              Show this help
 
@@ -206,6 +208,17 @@ function cmdList(): void {
   console.log(dim(`  optional add-ons: marketing   →  venom add <role>\n`));
 }
 
+function cmdTokens(args: Args): void {
+  const packs = loadPacks();
+  const pack = typeof args.pack === "string" ? args.pack : packs.defaultPack;
+  if (!packs.packs[pack]) {
+    console.error(red(`Unknown pack "${pack}". Try: ${Object.keys(packs.packs).join(", ")}`));
+    process.exitCode = 1;
+    return;
+  }
+  console.log(renderTokens(CORE, packs, pack));
+}
+
 async function cmdAdd(args: Args): Promise<void> {
   const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
   const role = args._[1];
@@ -261,6 +274,7 @@ async function main(): Promise<void> {
   if (cmd === "init") return cmdInit(args);
   if (cmd === "list") return cmdList();
   if (cmd === "add") return cmdAdd(args);
+  if (cmd === "tokens") return cmdTokens(args);
   console.error(red(`Unknown command "${cmd}".`));
   console.log(HELP);
   process.exitCode = 1;

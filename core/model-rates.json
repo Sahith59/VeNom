@@ -1,0 +1,12 @@
+{
+  "note": "Indicative INPUT prices per 1M tokens (USD), used only by `venom tokens` for cost estimates. Prices change often — update them here; they are directional, not billing-accurate. cacheReadFactor is the fraction of the input price charged for a cached-prefix read (prompt caching).",
+  "asOf": "2026-07",
+  "cacheReadFactor": 0.1,
+  "models": {
+    "claude-opus": { "label": "Claude Opus", "inputPerMTok": 15 },
+    "claude-sonnet": { "label": "Claude Sonnet", "inputPerMTok": 3 },
+    "claude-haiku": { "label": "Claude Haiku 4.5", "inputPerMTok": 0.8 },
+    "gpt-mini": { "label": "GPT-class mini", "inputPerMTok": 0.15 },
+    "gemini-flash": { "label": "Gemini Flash", "inputPerMTok": 0.1 }
+  }
+}
