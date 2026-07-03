@@ -74,6 +74,19 @@ test("cli add appends an optional role to an existing install", () => {
   } finally { rmSync(t, { recursive: true, force: true }); }
 });
 
+test("re-init preserves roles added via `venom add`", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
+  try {
+    run(["init", "--dir", t, "--pack", "solo-minimal", "--name", "X", "--yes"]);
+    run(["add", "marketing", "--dir", t]);
+    assert.ok(existsSync(join(t, ".claude", "agents", "marketing.md")), "marketing present after add");
+    run(["init", "--dir", t, "--pack", "solo-minimal", "--yes"]); // a plain re-init must NOT drop it
+    assert.ok(existsSync(join(t, ".claude", "agents", "marketing.md")), "marketing survives re-init");
+    const rec = JSON.parse(readFileSync(join(t, ".venom", "install.json"), "utf8"));
+    assert.ok(rec.extraRoles.includes("marketing"), "extraRoles persisted in the record");
+  } finally { rmSync(t, { recursive: true, force: true }); }
+});
+
 test("cli add routes through the installed tool's adapter (gemini)", () => {
   const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
   try {

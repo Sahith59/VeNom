@@ -97,19 +97,23 @@ async function cmdInit(args: Args): Promise<void> {
 
   console.log(bold(`\n  Venom — scaffolding your team for ${adapterInfo.name}`));
   const recPath = join(targetDir, ".venom", "install.json");
+  let priorExtraRoles: string[] = [];
+  let priorRemoveRoles: string[] = [];
   if (existsSync(recPath)) {
     console.log(dim("  Re-initializing — your existing CHARTER.md and agent-memory/ are preserved."));
-    let priorTool: string | undefined;
     try {
-      priorTool = JSON.parse(readFileSync(recPath, "utf8")).tool;
+      const prior = JSON.parse(readFileSync(recPath, "utf8"));
+      // Carry forward roles the owner added (`venom add`) or removed, so re-init doesn't drop them.
+      if (Array.isArray(prior.extraRoles)) priorExtraRoles = prior.extraRoles.filter((r: unknown) => typeof r === "string");
+      if (Array.isArray(prior.removeRoles)) priorRemoveRoles = prior.removeRoles.filter((r: unknown) => typeof r === "string");
+      if (prior.tool && prior.tool !== toolId) {
+        const priorInfo = ADAPTERS.find((a) => a.id === prior.tool);
+        console.log(
+          yellow(`  ! Switching tool from ${priorInfo?.name ?? prior.tool} to ${adapterInfo.name}. The previous tool's files are left in place — remove them by hand if you don't want both installed.`),
+        );
+      }
     } catch {
       /* ignore an unreadable record */
-    }
-    if (priorTool && priorTool !== toolId) {
-      const prior = ADAPTERS.find((a) => a.id === priorTool);
-      console.log(
-        yellow(`  ! Switching tool from ${prior?.name ?? priorTool} to ${adapterInfo.name}. The previous tool's files are left in place — remove them by hand if you don't want both installed.`),
-      );
     }
   }
 
@@ -153,6 +157,8 @@ async function cmdInit(args: Args): Promise<void> {
     projectName,
     version: readVersion(),
     force: Boolean(args.force),
+    extraRoles: priorExtraRoles,
+    removeRoles: priorRemoveRoles,
   });
 
   console.log(green(`\n  ✓ Installed the ${bold(packs.packs[pack].name)} team — ${res.agentsWritten} agents for ${adapterInfo.name}.\n`));
