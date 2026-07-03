@@ -42,7 +42,7 @@ test("cli init (non-interactive) installs a working team and fills the charter",
       "init", "--dir", t, "--pack", "solo-minimal", "--name", "My CLI Test",
       "--one-liner", "A payments API", "--non-negotiables", "never log card numbers; fail closed", "--yes",
     ]);
-    assert.match(out, /Installed 8 agents/, "reports the solo-minimal count");
+    assert.match(out, /Installed the Solo Minimal team — 8 agents for Claude Code/, "reports the solo-minimal count");
 
     assert.ok(existsSync(join(t, ".claude", "agents", "boss-1.md")), "boss-1 installed");
     assert.ok(existsSync(join(t, ".claude", "agents", "developer-1.md")), "developer-1 installed");
@@ -74,12 +74,38 @@ test("cli add appends an optional role to an existing install", () => {
   } finally { rmSync(t, { recursive: true, force: true }); }
 });
 
-test("cli init refuses a coming-soon adapter", () => {
+test("cli add routes through the installed tool's adapter (gemini)", () => {
   const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
   try {
-    let code = 0;
-    try { run(["init", "--dir", t, "--tool", "codex", "--yes"]); } catch (e) { code = e.status; }
-    assert.notEqual(code, 0, "non-zero exit for codex");
-    assert.ok(!existsSync(join(t, ".claude")), "nothing installed for a coming-soon tool");
+    run(["init", "--dir", t, "--tool", "gemini", "--pack", "solo-minimal", "--name", "X", "--yes"]);
+    const out = run(["add", "marketing", "--dir", t]);
+    assert.match(out, /Added marketing/);
+    assert.ok(existsSync(join(t, ".gemini", "commands", "venom", "marketing.toml")), "marketing command rendered");
+    assert.ok(!existsSync(join(t, ".claude")), "add used the recorded gemini tool, not the default");
+  } finally { rmSync(t, { recursive: true, force: true }); }
+});
+
+test("cli init --tool codex installs an AGENTS.md team", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
+  try {
+    const out = run(["init", "--dir", t, "--tool", "codex", "--pack", "solo-minimal", "--name", "X", "--yes"]);
+    assert.match(out, /Installed the .* team .* for Codex/, "reports a Codex install");
+    assert.ok(existsSync(join(t, "AGENTS.md")), "AGENTS.md written");
+    assert.ok(existsSync(join(t, ".venom", "agents", "boss-1.md")), "role specs written");
+    assert.ok(!existsSync(join(t, ".claude")), "no Claude Code artifacts");
+    const rec = JSON.parse(readFileSync(join(t, ".venom", "install.json"), "utf8"));
+    assert.equal(rec.tool, "codex");
+  } finally { rmSync(t, { recursive: true, force: true }); }
+});
+
+test("cli init --tool gemini installs slash-command roles", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
+  try {
+    const out = run(["init", "--dir", t, "--tool", "gemini", "--pack", "solo-minimal", "--name", "X", "--yes"]);
+    assert.match(out, /for Gemini CLI/, "reports a Gemini install");
+    assert.ok(existsSync(join(t, "GEMINI.md")), "GEMINI.md written");
+    assert.ok(existsSync(join(t, ".gemini", "commands", "venom", "boss-1.toml")), "/venom:boss-1 command written");
+    const rec = JSON.parse(readFileSync(join(t, ".venom", "install.json"), "utf8"));
+    assert.equal(rec.tool, "gemini");
   } finally { rmSync(t, { recursive: true, force: true }); }
 });
