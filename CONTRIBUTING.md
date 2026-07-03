@@ -37,8 +37,9 @@ core/                 # tool-agnostic (the value)
   packs.json          # pack definitions + the role catalog
   CHARTER_TEMPLATE.md # placeholders filled at init
 adapters/
-  claude-code/        # the fully-working v1 adapter (manifest, settings, renderer)
-  codex/ gemini/      # coming-soon stubs
+  claude-code/        # Claude Code subagents (manifest, settings, renderer)
+  codex/              # Codex AGENTS.md brief + .venom/agents/ role specs
+  gemini/             # Gemini GEMINI.md + /venom:<role> slash commands
 src/                  # the CLI (TypeScript → dist/)
 test/                 # adapter + CLI end-to-end tests
 ```
@@ -56,9 +57,11 @@ its spec must say so. Run `npm test` — the suite validates pack coherence.
    references the Charter in prose. Match the structure of the existing specs (read-first, what you
    own, how you coordinate, end-of-turn checklist).
 2. Add it to the `roles` catalog in `core/packs.json` (`team`, `title`, `summary`, `reportsTo`).
-3. Add a per-tool frontmatter entry in each adapter's manifest (e.g. `adapters/claude-code/manifest.json`)
-   with `model`, `tools`, and `description`.
-4. Add it to whichever pack(s) should staff it.
+3. Add a per-role frontmatter entry to the Claude Code manifest (`adapters/claude-code/manifest.json`)
+   with `model`, `tools`, and `description`. The Codex and Gemini adapters read role metadata straight
+   from `packs.json`, so they need no manifest entry.
+4. Add it to whichever pack(s) should staff it. Run `npm test` — every adapter's suite installs each
+   pack and checks the counts.
 
 ### Add a tool adapter (Codex, Gemini, …)
 An adapter is one self-contained ESM module (`adapters/<id>/adapter.mjs`) exporting:

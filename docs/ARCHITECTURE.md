@@ -22,17 +22,25 @@ flowchart LR
       PK["packs.json<br/>packs + role catalog"]
       CH["CHARTER_TEMPLATE.md"]
     end
-    subgraph ADP["adapters/ — thin, per-tool"]
+    subgraph ADP["adapters/ — thin, per-tool (all working)"]
       direction TB
-      CC["claude-code (ready)"]
-      CX["codex (coming soon)"]
-      GM["gemini (coming soon)"]
+      CC["claude-code"]
+      CX["codex"]
+      GM["gemini"]
     end
     CORE --> CC
-    CORE -.-> CX
-    CORE -.-> GM
-    CC --> OUT["your project<br/>.claude/agents/ · .claude/settings.json<br/>CHARTER.md · CLAUDE.md · agent-memory/"]
+    CORE --> CX
+    CORE --> GM
+    CC --> O1[".claude/agents/ subagents<br/>+ .claude/settings.json"]
+    CX --> O2["AGENTS.md brief<br/>+ .venom/agents/ specs"]
+    GM --> O3["GEMINI.md<br/>+ .gemini/commands/venom/"]
 ```
+
+All three also write the shared, tool-agnostic surfaces: `CHARTER.md`, `agent-memory/`, and
+`.venom/`. Each adapter maps the same core onto that tool's **native** primitives — Claude Code's
+subagents, Codex's `AGENTS.md`, Gemini's `GEMINI.md` + slash-commands — and each adapter's README
+notes exactly where a tool's mechanism differs (e.g. Claude Code enforces the read-only gates by
+tool permission; Codex and Gemini carry that constraint as instruction plus the tool's own sandbox).
 
 The agent specs never contain tool syntax or project specifics — a project's details live only in
 the generated `CHARTER.md`, which every agent reads at runtime. Adapters ship as plain ESM + JSON
@@ -114,7 +122,8 @@ flowchart LR
   Keep reporting lines resolvable (a worker whose head isn't in the pack needs a `reportsToFallback`).
 - **Add a role** — a portable spec in `core/agents/`, a `roles` catalog entry, and a per-adapter
   manifest entry (`model`, `tools`, `description`).
-- **Add a tool adapter** — one ESM module exporting `meta` + `install(opts)`. See
-  [`adapters/claude-code/README.md`](../adapters/claude-code/README.md) for the contract.
+- **Add a tool adapter** — one ESM module exporting `meta` + `install(opts)`. Three ship today as
+  reference implementations: [`claude-code`](../adapters/claude-code/README.md),
+  [`codex`](../adapters/codex/README.md), and [`gemini`](../adapters/gemini/README.md).
 
 Full steps are in [CONTRIBUTING.md](../CONTRIBUTING.md).

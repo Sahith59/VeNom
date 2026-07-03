@@ -37,9 +37,10 @@ writes the memory scaffold, and installs the agents where your coding tool looks
 minute, no config editing. Then open the project in your coding agent and give **boss-1** your first
 goal.
 
-> **Requirements:** a coding agent you already use — **[Claude Code](https://claude.com/claude-code)**
-> today (Codex and Gemini adapters are coming next) — and **Node.js ≥ 18.17**. Venom is for developers
-> comfortable in a terminal; it doesn't try to be a no-terminal GUI.
+> **Requirements:** a coding agent you already use — **[Claude Code](https://claude.com/claude-code)**,
+> **[Codex](https://github.com/openai/codex)**, or **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** —
+> and **Node.js ≥ 18.17**. Venom is for developers comfortable in a terminal; it doesn't try to be a
+> no-terminal GUI.
 
 ```mermaid
 flowchart LR
@@ -63,6 +64,10 @@ your-project/
 
 Nothing is clobbered on re-run: your `CHARTER.md`, your own notes in `CLAUDE.md`, your existing
 `settings.json` rules, and your live `agent-memory/` are all preserved.
+
+> That's the **Claude Code** layout. `--tool codex` installs the same team as an `AGENTS.md` brief
+> plus `.venom/agents/` role specs; `--tool gemini` installs it as `GEMINI.md` plus `/venom:<role>`
+> slash-commands under `.gemini/commands/`. Same core, same memory — mapped to each tool's native shape.
 
 ## The two ideas that make it a team (not a pile of prompts)
 
@@ -155,14 +160,19 @@ tool expects. This is what lets one framework target many tools without rewritin
 venom/
 ├── core/            # tool-agnostic: agents/, memory-template/, workflow.md, packs.json, CHARTER_TEMPLATE.md
 ├── adapters/
-│   └── claude-code/ # v1: fully working. Renders core → .claude/agents/ + settings.json
+│   ├── claude-code/ # core → .claude/agents/ subagents + settings.json
+│   ├── codex/       # core → AGENTS.md brief + .venom/agents/ role specs
+│   └── gemini/      # core → GEMINI.md + .gemini/commands/venom/ slash-commands
 ├── bin/             # the venom CLI entry
 └── src/             # the CLI (TypeScript → dist/; zero runtime dependencies)
 ```
 
 Project specifics live only in the generated `CHARTER.md`; the agent specs stay generic and read the
-Charter at runtime. Adapters ship as plain ESM + JSON with no build step — so adding a tool is one
-file, not a rewrite.
+Charter at runtime. Each adapter maps that one core onto its tool's **native** primitives — so the
+team is real in each, and each adapter's README notes exactly where a tool's mechanism differs (e.g.
+Claude Code enforces the read-only gates by tool permission; Codex and Gemini carry that as
+instruction plus the tool's own sandbox). Adapters ship as plain ESM + JSON with no build step — so
+adding a tool is one file, not a rewrite.
 
 **Deeper diagrams** — the core↔adapter mapping, how agents coordinate through shared memory, and the
 review loop — are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
@@ -193,7 +203,7 @@ init options:
   --one-liner <text>      One-line description of the project
   --non-negotiables <t>   Rules that must never be broken (separate with ';')
   --out-of-lane <text>    What the project deliberately won't do
-  --tool <id>             claude-code (default; Codex + Gemini coming soon)
+  --tool <id>             claude-code (default) | codex | gemini  (auto-detected if omitted)
   --dir <path>            Target directory (default: current)
   --force                 Overwrite an existing CHARTER.md
   --yes, -y               Non-interactive: use flags + defaults
@@ -205,7 +215,8 @@ Venom is built to be extended:
 
 - **Add a pack** — one entry in `core/packs.json` referencing existing roles.
 - **Add a role** — a portable spec in `core/agents/` plus a manifest entry per adapter.
-- **Add a tool adapter** — one self-contained ESM module (see `adapters/claude-code/README.md`).
+- **Add a tool adapter** — one self-contained ESM module. Three ship today as reference
+  implementations: `adapters/claude-code`, `adapters/codex`, and `adapters/gemini`.
 
 See the wiring diagram in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#wire-it-to-your-needs)** and the
 full steps in [CONTRIBUTING.md](CONTRIBUTING.md).
