@@ -1,0 +1,56 @@
+{
+  "name": "venomkit",
+  "version": "0.1.0",
+  "description": "Scaffold a whole team of role-based AI agents with shared, persistent memory into any project — one command, works with your coding agent.",
+  "keywords": [
+    "ai",
+    "ai-agents",
+    "agents",
+    "multi-agent",
+    "claude",
+    "claude-code",
+    "codex",
+    "gemini",
+    "cli",
+    "scaffold",
+    "developer-tools",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/Sahith59/VeNom#readme",
+  "bugs": {
+    "url": "https://github.com/Sahith59/VeNom/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sahith59/VeNom.git"
+  },
+  "license": "MIT",
+  "author": "Sahith Reddy Thummala <sahith0904@gmail.com>",
+  "type": "module",
+  "bin": {
+    "venom": "bin/venom.js",
+    "venomkit": "bin/venom.js"
+  },
+  "files": [
+    "bin",
+    "dist/**/*.js",
+    "core",
+    "adapters",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json",
+    "test": "npm run build && node --test",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

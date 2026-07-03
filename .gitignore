@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Scratch
+tmp/
+*.local
+
+# Internal working & design docs (kept local, not published to the public repo)
+PLAN.md
+CLAUDE.md
+PROJECT_BRIEF.md
+AGENT_SPECS.md
+MEGA_PROMPT_AND_SETUP*.md
+docs/POSITIONING_AND_ARCHITECTURE.md
+docs/BUILD_ROADMAP.md
