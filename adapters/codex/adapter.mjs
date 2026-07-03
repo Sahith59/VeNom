@@ -165,10 +165,11 @@ export function install(opts) {
 
   // 3) Charter (never clobber unless forced).
   const charterPath = join(targetDir, "CHARTER.md");
+  const charterExisted = existsSync(charterPath);
   let charterAction;
-  if (!existsSync(charterPath) || force) {
+  if (!charterExisted || force) {
     writeFileSync(charterPath, charterContent.endsWith("\n") ? charterContent : charterContent + "\n");
-    charterAction = force && existsSync(charterPath) ? "overwritten" : "created";
+    charterAction = charterExisted ? "overwritten" : "created";
   } else {
     charterAction = "kept (existing)";
     warnings.push("CHARTER.md already existed and was kept; pass force to overwrite.");

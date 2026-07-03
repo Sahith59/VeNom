@@ -116,6 +116,18 @@ test("EVERY pack installs with the right spec count", () => {
   }
 });
 
+test("charter action label is accurate (force-on-fresh = created, not overwritten)", () => {
+  const t = fresh();
+  try {
+    const r1 = install({ coreDir: CORE, targetDir: t, pack: "solo-minimal", charterContent: CHARTER, force: true, now: NOW });
+    assert.equal(r1.actions.charter, "created", "force on a fresh dir is a create, not an overwrite");
+    const r2 = install({ coreDir: CORE, targetDir: t, pack: "solo-minimal", charterContent: "# new\n", force: true, now: NOW });
+    assert.equal(r2.actions.charter, "overwritten", "force over an existing charter is an overwrite");
+    const r3 = install({ coreDir: CORE, targetDir: t, pack: "solo-minimal", charterContent: "# ignored\n", now: NOW });
+    assert.equal(r3.actions.charter, "kept (existing)", "no force keeps the existing charter");
+  } finally { rmSync(t, { recursive: true, force: true }); }
+});
+
 test("meta.detect keys on .codex/, not a cross-tool AGENTS.md", () => {
   const t = fresh();
   try {
