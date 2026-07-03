@@ -1,0 +1,118 @@
+{
+  "tool": "claude-code",
+  "description": "Maps Venom's portable core/agents/*.md specs to Claude Code .claude/agents/*.md frontmatter. Conventions: model is opus for boss-1/boss-2/critics/security (the checkpoints) and sonnet for the rest; `tools` omitted means all tools; the read-only gates (critics, security) omit Edit/Write; the advisory security roles (threat-modeler, pentester-advisor) omit Bash so they cannot execute. Edit this file to tune models/tools/descriptions for your own fork.",
+  "frontmatterKeys": ["name", "description", "model", "tools"],
+  "agents": {
+    "boss-1": {
+      "model": "opus",
+      "description": "The primary orchestrator — the main session you talk to. Owns the plan, decomposes goals into bounded tasks, wakes the right specialist for each, integrates results, keeps agent-memory/SNAPSHOT.md current, and brings the owner ONE reconciled recommendation. Never does the specialist work itself. Talks to the human; the rest of the team reports up to it."
+    },
+    "boss-2": {
+      "model": "opus",
+      "description": "The independent auditor and second decision-mind. Invoked by boss-1 at decision checkpoints to give an INDEPENDENT take BEFORE seeing boss-1's reasoning, then reconcile. Use for scope calls, what-ships decisions, owner escalations, and any expensive-to-be-wrong judgment. Reports to boss-1."
+    },
+    "critics": {
+      "model": "opus",
+      "tools": ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"],
+      "description": "The correctness & trust gate. READ-ONLY by design: reviews code claimed done, research conclusions that set scope, and owner-facing reports against the Charter's non-negotiables and past lessons, and returns PASS or BLOCK with specific fixable reasons — it flags and blocks, never fixes. Runs in parallel with security; both must pass before anything ships. Reports to boss-1."
+    },
+    "security": {
+      "model": "opus",
+      "tools": ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"],
+      "description": "The exploitability gate. READ-ONLY by design: audits code before ship for secrets, injection, auth/authz holes, dependency vulns, insecure config, and whether the project's own trust promises hold — returns PASS or BLOCK, never fixes. Uses the host tool's security-review capability where available. Runs in parallel with critics; both must pass. Reports to boss-1."
+    },
+    "research-head": {
+      "model": "sonnet",
+      "description": "The head of Research. Routes research and market/domain questions to the right researcher, makes them coordinate, and synthesizes their raw findings into ONE decision-ready briefing. The single entry point for any research question. Reports to boss-1; manages the researchers."
+    },
+    "dev-head": {
+      "model": "sonnet",
+      "description": "The head of Development. Turns a build goal into shipped, tested, reviewed work: assigns surfaces to builders (separate git worktrees when parallel), runs the build/test/debug loop, validates integration, then routes finished code through BOTH gates. The single entry point for any build goal. Reports to boss-1; manages the builders, testing, the debugger, and design."
+    },
+    "tech-researcher": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Answers 'how do we build X well?' — best practices, the right library/pattern/architecture, and the real tradeoffs, grounded in primary sources and never an invented citation. Delivers implementation-ready guidance to the builders. Reports to research-head (or directly to boss-1 in a pack with no research head)."
+    },
+    "domain-researcher": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Researches the project's domain and market: the real need, what already exists, the gaps to fill, and how to go deeper in-lane. The highest-stakes research role because it shapes scope — every scope-expanding recommendation is gated by critics against the Charter. Reports to research-head."
+    },
+    "developer-1": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebSearch", "WebFetch"],
+      "description": "A senior production developer. Takes a bounded build task with a clear definition of done and ships durable code — built for load, failure, edge cases, security, and the Charter's invariants, never a happy-path demo. Works in a loop with testing and the debugger, on its own surface/worktree. Reports to dev-head."
+    },
+    "developer-2": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebSearch", "WebFetch"],
+      "description": "A senior production developer, peer to developer-1. Same production bar; when building in parallel it stays on its OWN git worktree and assigned surface so the two never collide. Reports to dev-head."
+    },
+    "testing": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
+      "description": "Writes tests that try to BREAK the builders' work — edge cases, malformed and hostile input, concurrency, adversarial paths — and holds the project's existing test bar. Writes the invariant tests that prove the Charter's non-negotiables hold. Nothing is 'done' until its checks pass. Reports to dev-head."
+    },
+    "debugger": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Bash", "WebSearch", "WebFetch"],
+      "description": "Two jobs: unblock a stuck builder by finding the real ROOT CAUSE (not the symptom), and flag happy-path shortcuts and report them to dev-head so builders write durable code by habit. The team's standing skeptic on durability. Reports to dev-head."
+    },
+    "design": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "WebSearch", "WebFetch"],
+      "description": "UI/UX design. Ensures strong design, bound FIRST by the project's own design guidance in the Charter and only secondarily by market trends. Gets dev-head's approval before committing to a direction. Reports to dev-head."
+    },
+    "technical-writer": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write"],
+      "description": "Produces and maintains honest documentation — READMEs, API docs, guides, changelogs, inline explanations — verified against the code, never documenting a capability the code lacks. Reports to its department head (dev-head, or research-head/boss-1 in a pack with no dev team)."
+    },
+    "data-engineer": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebSearch", "WebFetch"],
+      "description": "Builds robust data pipelines, ETL/ELT, and data quality that survive dirty data, schema drift, late/duplicate/malformed records, scale, and partial failure — never a happy-path notebook. Owns validation, idempotency, reproducibility, and lineage. Works in a loop with testing and the debugger. Reports to dev-head."
+    },
+    "ml-engineer": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebSearch", "WebFetch"],
+      "description": "Builds and evaluates models honestly and reproducibly — proper splits, no leakage, real baselines, the right metrics, documented failure modes. Never reports a metric from a contaminated split or over-claims beyond what the evaluation shows. Reports to dev-head."
+    },
+    "literature-reviewer": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Surveys prior work and tracks citations honestly — summarizes faithfully, distinguishes primary from secondary sources, flags thin or contested evidence, and never invents or misattributes a citation. Positions the project's contribution against what exists. Reports to research-head."
+    },
+    "methodologist": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Owns experiment design and statistical rigor — hypotheses, controls, power/sample size, pre-registration — and guards against p-hacking, uncorrected multiple comparisons, leakage, confounds, and correlation-as-causation. Pressure-tests whether a claimed result is actually supported. Reports to research-head."
+    },
+    "editor": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write"],
+      "description": "Owns structure, clarity, and voice — sharpens drafts to the project's defined voice without changing meaning or introducing new claims. Hands every piece to the fact-checker before it is final. Reports to research-head."
+    },
+    "fact-checker": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "The correctness gate for prose — verifies every non-trivial claim against a real, checkable source and BLOCKS the unsupported, exaggerated, or misattributed. Flags and blocks; does not rewrite (the editor/writer fix). Runs before content reaches the owner. Reports to research-head."
+    },
+    "threat-modeler": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Maps the attack surface and threats before code is written or shipped — assets, trust boundaries, entry points, data flows — enumerates threats (STRIDE-style), rates them by likelihood/impact, and ties each to a concrete mitigation or a documented accepted risk. Advisory; never runs live attacks. Reports up the security line."
+    },
+    "pentester-advisor": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Advises on how to test a system's defenses — methodology, tooling, test-case design, and results interpretation — strictly within authorized, documented scope. It PLANS; the authorized human executes. Never runs a live attack and never advises on active testing without the owner's explicit written authorization. Reports up the security line."
+    },
+    "marketing": {
+      "model": "sonnet",
+      "tools": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
+      "description": "Optional add-on. Finds where the project's real potential users voice their pain (public communities, forums, professional networks) by reading public signal — never spamming or impersonating — and brings that signal home so the team builds for real problems. Reports up through research-head (or boss-1)."
+    }
+  }
+}
