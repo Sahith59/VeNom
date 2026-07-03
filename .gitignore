@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# npm pack artifacts
+*.tgz
+
 # Logs
 *.log
 npm-debug.log*
