@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/Sahith59/VeNom#quickstart
+    about: How to install and drive the team — start with the README quickstart, then .venom/workflow.md.
+  - name: Report a security vulnerability
+    url: https://github.com/Sahith59/VeNom/security/policy
+    about: Please don't open a public issue for security problems — follow the security policy.

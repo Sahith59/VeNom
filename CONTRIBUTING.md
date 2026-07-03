@@ -79,9 +79,11 @@ The `core/` layer never changes for a new tool — only the thin mapping.
 
 ## Reporting issues
 
-Open an issue with what you expected, what happened, your OS + Node version, and the command you ran.
-For anything security-sensitive, please report privately to the maintainer rather than in a public
-issue.
+Open an issue using the **bug report** or **feature request** template — they prompt for what's needed
+(what you expected, what happened, your OS + Node version, and the command you ran).
+
+For anything security-sensitive, **do not** open a public issue — follow the [Security Policy](SECURITY.md)
+to report it privately. And please keep discussion within the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

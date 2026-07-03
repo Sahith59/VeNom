@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest a new pack, role, tool adapter, or CLI capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. One thing to know up front: Venom keeps an honest positioning — it will not
+        adopt "does your work for you" or productivity-multiplier claims. Proposals that fit that bar
+        move fastest.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem or gap?
+      description: What can't you do today, or what's awkward about the current flow?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Venom to do?
+      description: Describe the behavior you'd want. Concrete examples help.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of Venom?
+      options:
+        - A new tool adapter (Codex, Gemini, other)
+        - A new pack
+        - A new or changed agent role
+        - The CLI (init / list / add)
+        - The memory or workflow model
+        - Docs
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other ways to solve this, and why they fall short.
+    validations:
+      required: false
