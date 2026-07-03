@@ -7,6 +7,7 @@ import { fillCharter } from "./charter.js";
 import { loadAdapter, detectTool, ADAPTERS } from "./tool.js";
 import { renderTokens } from "./tokens.js";
 import { loadModels, resolvePreset, presetNames } from "./models.js";
+import { loadBudgets, renderStats, renderCompact, renderIndex } from "./memory.js";
 import { bold, dim, cyan, green, yellow, red } from "./style.js";
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,7 +31,7 @@ function parseArgs(argv: string[]): Args {
       continue;
     }
     const next = argv[i + 1];
-    const isBoolFlag = ["yes", "help", "version", "force"].includes(key);
+    const isBoolFlag = ["yes", "help", "version", "force", "write"].includes(key);
     if (isBoolFlag || next === undefined || next.startsWith("-")) {
       args[key] = true;
     } else {
@@ -63,6 +64,7 @@ ${bold("Usage")}
   venom add <role>          Add an optional role to an existing install
   venom tokens [--pack <id>]  Estimate the token footprint + cost across models
   venom models [preset]     Show or switch the model preset (quality/balanced/budget)
+  venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
   venom --version           Print the version
   venom --help              Show this help
 
@@ -77,6 +79,14 @@ ${bold("init options")}
   --dir <path>              Target project directory (default: current)
   --force                   Overwrite an existing CHARTER.md
   --yes, -y                 Non-interactive: use flags + defaults, no prompts
+
+${bold("memory commands")} ${dim("(operate on ./agent-memory, or pass --dir <project>)")}
+  venom memory stats        Show the memory footprint — hot read-path vs. cold archives
+  venom memory compact      Archive old team-log entries (dry run; add --write to apply)
+  venom memory index        Regenerate INDEX.md's entry catalog (preview; --write to save)
+  --keep <n>                compact: entries to keep hot per log (default 20)
+  --budget <tok>            compact: keep newest entries under this token budget instead
+  --write                   compact/index: actually write (default is a safe dry run)
 
 Works with Claude Code, Codex, and Gemini CLI.
 `;
@@ -297,6 +307,56 @@ async function cmdModels(args: Args): Promise<void> {
   }
 }
 
+function cmdMemory(args: Args): void {
+  const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
+  const memDir = join(targetDir, "agent-memory");
+  if (!existsSync(memDir)) {
+    console.error(red(`No agent-memory/ found in ${targetDir}. Run \`venom init\` first, or pass --dir <project>.`));
+    process.exitCode = 1;
+    return;
+  }
+  const sub = args._[1] ?? "stats";
+  const budgets = loadBudgets(CORE);
+  const write = Boolean(args.write);
+
+  if (sub === "stats") {
+    console.log(renderStats(memDir, budgets));
+    return;
+  }
+  if (sub === "compact") {
+    // A dash-prefixed or missing value (e.g. `--keep -5`, `--keep`) parses to boolean true — catch it
+    // so the bound isn't silently dropped back to the default.
+    if (args.keep === true || args.budget === true) {
+      console.error(red("--keep and --budget each need a numeric value, e.g. `--keep 20` or `--budget 2500`."));
+      process.exitCode = 1;
+      return;
+    }
+    const keep = typeof args.keep === "string" ? Number(args.keep) : undefined;
+    const budgetTok = typeof args.budget === "string" ? Number(args.budget) : undefined;
+    if (keep !== undefined && (!Number.isInteger(keep) || keep < 0)) {
+      console.error(red("--keep must be a non-negative integer."));
+      process.exitCode = 1;
+      return;
+    }
+    if (budgetTok !== undefined && (!Number.isFinite(budgetTok) || budgetTok <= 0)) {
+      console.error(red("--budget must be a positive number of tokens."));
+      process.exitCode = 1;
+      return;
+    }
+    if (keep !== undefined && budgetTok !== undefined) {
+      console.log(dim("  Note: both --keep and --budget given; using --budget."));
+    }
+    console.log(renderCompact(memDir, { keep, budgetTok }, write, budgets));
+    return;
+  }
+  if (sub === "index") {
+    console.log(renderIndex(memDir, write));
+    return;
+  }
+  console.error(red(`Unknown memory subcommand "${sub}". Use: stats | compact | index.`));
+  process.exitCode = 1;
+}
+
 async function cmdAdd(args: Args): Promise<void> {
   const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
   const role = args._[1];
@@ -354,6 +414,7 @@ async function main(): Promise<void> {
   if (cmd === "add") return cmdAdd(args);
   if (cmd === "tokens") return cmdTokens(args);
   if (cmd === "models") return cmdModels(args);
+  if (cmd === "memory") return cmdMemory(args);
   console.error(red(`Unknown command "${cmd}".`));
   console.log(HELP);
   process.exitCode = 1;

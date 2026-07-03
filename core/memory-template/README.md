@@ -89,6 +89,29 @@ referenced by your task. Skip the rest — that is what keeps this cheap on cont
 
 ---
 
+## Keeping memory cheap as it grows (the bounding discipline)
+
+Logs are append-only, so they grow — and the per-turn read cost grows with them. Keep it bounded:
+
+- **Scan the index, not whole logs.** `INDEX.md` carries an auto-generated catalog of every log's
+  `###` entry headers. Read it to find the one entry you need, then open only that. Refresh it with
+  `venom memory index --write` (or `npx venomkit memory index --write`).
+- **Compact old entries out of the hot path.** `venom memory compact --write` keeps the newest
+  entries in each `log.md` and moves the rest to `log.archive.md` — **verbatim, never deleted**. The
+  archive is cold storage for audit and recovery; agents don't read it in the normal path. Run it when
+  a log grows past its budget — `venom memory stats` flags which logs to compact.
+- **Distil, don't accumulate.** Settled conclusions belong in the team's distilled file
+  (`architecture.md` / `knowledge.md` / `threat-models.md`), not as an ever-growing pile of log
+  entries. One distilled paragraph you read beats fifty log entries you scan.
+- **SNAPSHOT stays lean.** It is the live board, not a history — boss-1 rewrites it to the current
+  state; old detail lives in the log, not here.
+
+Honest note: these are disciplines and tools, not automatic magic. Venom does not run inside the
+model's inference, so it cannot *force* selective reading — it keeps the memory bounded and navigable
+so the team *can* read cheaply, and boss-1 (or you) runs `venom memory compact` to keep it that way.
+
+---
+
 ## lessons/ — the team learns (knowledge compounds, rules stay fixed)
 
 When you make or catch a mistake, or find a reusable pattern or trap, append a lesson to

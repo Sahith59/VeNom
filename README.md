@@ -202,6 +202,7 @@ venom list                Show the available packs and roles
 venom add <role>          Add an optional role to an existing install
 venom tokens [--pack <id>]  Estimate token footprint + cost across models/presets
 venom models [preset]     Show or switch the model preset (quality | balanced | budget)
+venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
 venom --version           Print the version
 venom --help              Full help
 
@@ -222,6 +223,14 @@ init options:
 models, and compares the presets. `venom models budget` downshifts the workers to a cheaper model —
 per-role on Claude Code (real, in each subagent's frontmatter); a recommended session model on
 Codex/Gemini. Run `venom tokens` before and after to see the delta.
+
+**Memory control.** Shared memory is append-only, so it grows. `venom memory stats` shows where the
+tokens are (hot read-path vs. cold archives) and flags logs over budget; `venom memory compact --write`
+keeps the newest entries in each team log and archives the rest to `log.archive.md` — **verbatim, never
+deleted** — to bound what agents read each turn; `venom memory index --write` refreshes `INDEX.md`'s
+entry catalog so agents scan an index instead of whole logs. Compaction is a safe dry run by default.
+Honest scope: Venom doesn't own the model's inference, so these keep memory bounded and navigable —
+they can't force selective reading; boss-1 (or you) runs them to keep the tier lean.
 
 ## Extend it
 

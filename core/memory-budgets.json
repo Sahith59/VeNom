@@ -1,0 +1,10 @@
+{
+  "hotLogEntries": 20,
+  "budgetsTok": {
+    "SNAPSHOT.md": 1600,
+    "log": 2500,
+    "distilled": 2200,
+    "lessons": 1600
+  },
+  "note": "Advisory token budgets (char/4 proxy). `venom memory stats` flags files over these; `venom memory compact` keeps the newest hotLogEntries entries of each team log in the hot path and archives the rest (never deletes). Budgets are guidance, not enforcement — Venom does not own the LLM call, so these bound what the team is asked to read, they cannot force it."
+}
