@@ -1,0 +1,25 @@
+{
+  "note": "Model presets — the token/cost lever. Roles are grouped; each preset maps a group to a capability tier (strong/mid/cheap); each adapter maps a tier to a concrete model. Claude Code applies models PER ROLE (enforced via each subagent's frontmatter). Codex and Gemini choose ONE model per session, so for them a preset is advisory — it recommends a session model. Evidence it's safe to downshift: X-MemoryArch found Haiku ≈ Sonnet (≤0.003 recall delta) for extraction-style work. Edit tierModels if a tool's model names change.",
+  "defaultPreset": "balanced",
+  "groups": {
+    "bosses": ["boss-1", "boss-2"],
+    "gates": ["critics", "security"],
+    "heads": ["research-head", "dev-head"]
+  },
+  "presets": {
+    "quality": { "bosses": "strong", "gates": "strong", "heads": "strong", "workers": "mid" },
+    "balanced": { "bosses": "strong", "gates": "strong", "heads": "mid", "workers": "mid" },
+    "budget": { "bosses": "mid", "gates": "mid", "heads": "cheap", "workers": "cheap" }
+  },
+  "presetSummary": {
+    "quality": "Highest fidelity — bosses, gates, and heads on the strong model.",
+    "balanced": "Default — strong bosses + gates, mid-tier heads and workers.",
+    "budget": "Lowest cost — mid bosses + gates, cheap workers (Haiku-class)."
+  },
+  "tierModels": {
+    "claude-code": { "strong": "opus", "mid": "sonnet", "cheap": "haiku" },
+    "codex": { "strong": "gpt-5", "mid": "gpt-5", "cheap": "gpt-5-mini" },
+    "gemini": { "strong": "gemini-2.5-pro", "mid": "gemini-2.5-pro", "cheap": "gemini-2.5-flash" }
+  },
+  "tierRateKey": { "strong": "claude-opus", "mid": "claude-sonnet", "cheap": "claude-haiku" }
+}

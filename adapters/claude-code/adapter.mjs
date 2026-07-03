@@ -131,7 +131,7 @@ export function install(opts) {
   const {
     coreDir, targetDir, pack, charterContent,
     projectName = "This project", extraRoles = [], removeRoles = [],
-    force = false, version = "0.0.0", now,
+    force = false, version = "0.0.0", now, modelByRole = {}, preset = "",
   } = opts;
 
   const warnings = [];
@@ -174,10 +174,11 @@ export function install(opts) {
     }
   }
 
-  // 1) Render agents.
+  // 1) Render agents (a model preset can override the manifest's per-role model).
   for (const r of roles) {
     const body = readFileSync(join(coreDir, "agents", `${r}.md`), "utf8");
-    writeFileSync(join(agentsDir, `${r}.md`), renderFrontmatter(r, manifest.agents[r]) + body.replace(/^﻿/, ""));
+    const m = modelByRole[r] ? { ...manifest.agents[r], model: modelByRole[r] } : manifest.agents[r];
+    writeFileSync(join(agentsDir, `${r}.md`), renderFrontmatter(r, m) + body.replace(/^﻿/, ""));
   }
 
   // 2) Settings (safe merge).
@@ -214,6 +215,7 @@ export function install(opts) {
     tool: "claude-code",
     version,
     pack,
+    preset,
     roles,
     extraRoles,
     removeRoles,

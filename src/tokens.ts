@@ -5,6 +5,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { bold, dim } from "./style.js";
+import { loadModels, resolvePreset } from "./models.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Packs = any;
@@ -112,6 +113,24 @@ export function renderTokens(coreDir: string, packs: Packs, pack: string): strin
     const cached = full * cacheMix;
     L.push(`  ${dim(m.label.padEnd(18))} ${usd(full).padStart(9)}   ${dim(`with prompt caching ~${usd(cached)}`)}`);
   }
+  L.push("");
+
+  // Model-preset comparison — the M1 lever, in the same view.
+  const models = loadModels(coreDir);
+  const roles: string[] = [...packs.core, ...packs.packs[pack].adds];
+  L.push(bold("  Cost per goal by model preset") + dim(" (Claude family — the model knob):"));
+  for (const presetName of Object.keys(models.presets)) {
+    const plan = resolvePreset(coreDir, roles, "claude-code", presetName);
+    const blended =
+      roles.reduce((s, r) => {
+        const tier = plan.tierByRole[r] || "mid";
+        return s + (rates.models[models.tierRateKey[tier]]?.inputPerMTok ?? 0);
+      }, 0) / roles.length;
+    const cost = (e.perGoal / 1_000_000) * blended;
+    const label = presetName + (presetName === models.defaultPreset ? " (default)" : "");
+    L.push(`  ${dim(label.padEnd(20))} ~${usd(cost).padStart(8)}   ${dim(models.presetSummary[presetName] || "")}`);
+  }
+  L.push(dim("  Change it:  venom init --models budget   ·   venom models <preset>"));
   L.push("");
   L.push(dim("  Estimates use a char/4 proxy; prices are directional (edit core/model-rates.json)."));
   L.push(dim("  Run before/after a change to see the delta — that's what this is for."));

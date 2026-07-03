@@ -200,6 +200,8 @@ add-on (`venom add marketing`).
 venom init [options]      Install a team into the current project
 venom list                Show the available packs and roles
 venom add <role>          Add an optional role to an existing install
+venom tokens [--pack <id>]  Estimate token footprint + cost across models/presets
+venom models [preset]     Show or switch the model preset (quality | balanced | budget)
 venom --version           Print the version
 venom --help              Full help
 
@@ -210,10 +212,16 @@ init options:
   --non-negotiables <t>   Rules that must never be broken (separate with ';')
   --out-of-lane <text>    What the project deliberately won't do
   --tool <id>             claude-code (default) | codex | gemini  (auto-detected if omitted)
+  --models <preset>       quality | balanced (default) | budget  — cost/quality tradeoff
   --dir <path>            Target directory (default: current)
   --force                 Overwrite an existing CHARTER.md
   --yes, -y               Non-interactive: use flags + defaults
 ```
+
+**Token control.** `venom tokens` estimates the per-turn and per-goal footprint and the cost across
+models, and compares the presets. `venom models budget` downshifts the workers to a cheaper model —
+per-role on Claude Code (real, in each subagent's frontmatter); a recommended session model on
+Codex/Gemini. Run `venom tokens` before and after to see the delta.
 
 ## Extend it
 

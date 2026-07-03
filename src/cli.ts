@@ -6,6 +6,7 @@ import { text, select, isInteractive } from "./prompts.js";
 import { fillCharter } from "./charter.js";
 import { loadAdapter, detectTool, ADAPTERS } from "./tool.js";
 import { renderTokens } from "./tokens.js";
+import { loadModels, resolvePreset, presetNames } from "./models.js";
 import { bold, dim, cyan, green, yellow, red } from "./style.js";
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,6 +62,7 @@ ${bold("Usage")}
   venom list                Show the available packs and roles
   venom add <role>          Add an optional role to an existing install
   venom tokens [--pack <id>]  Estimate the token footprint + cost across models
+  venom models [preset]     Show or switch the model preset (quality/balanced/budget)
   venom --version           Print the version
   venom --help              Show this help
 
@@ -71,6 +73,7 @@ ${bold("init options")}
   --non-negotiables <text>  Rules that must never be broken (separate with ';')
   --out-of-lane <text>      What the project deliberately will not do
   --tool <id>               claude-code (default) | codex | gemini  (auto-detected if omitted)
+  --models <preset>         quality | balanced (default) | budget  — cost/quality tradeoff
   --dir <path>              Target project directory (default: current)
   --force                   Overwrite an existing CHARTER.md
   --yes, -y                 Non-interactive: use flags + defaults, no prompts
@@ -139,13 +142,15 @@ async function cmdInit(args: Args): Promise<void> {
   const recPath = join(targetDir, ".venom", "install.json");
   let priorExtraRoles: string[] = [];
   let priorRemoveRoles: string[] = [];
+  let priorPreset = "";
   if (existsSync(recPath)) {
     console.log(dim("  Re-initializing — your existing CHARTER.md and agent-memory/ are preserved."));
     try {
       const prior = JSON.parse(readFileSync(recPath, "utf8"));
-      // Carry forward roles the owner added (`venom add`) or removed, so re-init doesn't drop them.
+      // Carry forward roles the owner added (`venom add`) or removed, and the model preset.
       if (Array.isArray(prior.extraRoles)) priorExtraRoles = prior.extraRoles.filter((r: unknown) => typeof r === "string");
       if (Array.isArray(prior.removeRoles)) priorRemoveRoles = prior.removeRoles.filter((r: unknown) => typeof r === "string");
+      if (typeof prior.preset === "string") priorPreset = prior.preset;
       if (prior.tool && prior.tool !== toolId) {
         const priorInfo = ADAPTERS.find((a) => a.id === prior.tool);
         console.log(
@@ -159,6 +164,18 @@ async function cmdInit(args: Args): Promise<void> {
 
   if (!packs.packs[pack]) {
     console.error(red(`Unknown pack "${pack}". Try: ${packIds.join(", ")}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Resolve the model preset (flag > carried-forward > default).
+  const modelsCfg = loadModels(CORE);
+  const presetName = typeof args.models === "string" ? args.models : priorPreset || modelsCfg.defaultPreset;
+  let plan;
+  try {
+    plan = resolvePreset(CORE, Object.keys(packs.roles), toolId, presetName);
+  } catch (err) {
+    console.error(red(err instanceof Error ? err.message : String(err)));
     process.exitCode = 1;
     return;
   }
@@ -177,6 +194,8 @@ async function cmdInit(args: Args): Promise<void> {
     force: Boolean(args.force),
     extraRoles: priorExtraRoles,
     removeRoles: priorRemoveRoles,
+    modelByRole: plan.modelByRole,
+    preset: plan.preset,
   });
 
   console.log(green(`\n  ✓ Installed the ${bold(packs.packs[pack].name)} team — ${res.agentsWritten} agents for ${adapterInfo.name}.\n`));
@@ -185,6 +204,10 @@ async function cmdInit(args: Args): Promise<void> {
     const note = item.note ? dim(`  ${item.note}`) : "";
     console.log(`  ${dim(item.label.padEnd(8))} ${item.path}${note}`);
   }
+  const modelNote = plan.perRole
+    ? dim("  · applied per role")
+    : dim(`  · advisory: run ${adapterInfo.name} with ${plan.sessionModel} (it uses one model per session)`);
+  console.log(`  ${dim("models".padEnd(8))} ${plan.preset} preset${modelNote}`);
   for (const w of res.warnings) console.log(yellow(`  ! ${w}`));
 
   console.log(bold("\n  Next:"));
@@ -217,6 +240,61 @@ function cmdTokens(args: Args): void {
     return;
   }
   console.log(renderTokens(CORE, packs, pack));
+}
+
+async function cmdModels(args: Args): Promise<void> {
+  const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
+  const packs = loadPacks();
+  const modelsCfg = loadModels(CORE);
+  const preset = args._[1];
+
+  if (!preset) {
+    console.log(bold("\n  Model presets\n"));
+    for (const name of presetNames(CORE)) {
+      console.log(`  ${bold(name)}${name === modelsCfg.defaultPreset ? dim(" (default)") : ""}  ${dim(modelsCfg.presetSummary[name] ?? "")}`);
+    }
+    console.log(dim("\n  Apply:  venom models <preset>    ·    compare costs:  venom tokens\n"));
+    return;
+  }
+
+  const recPath = join(targetDir, ".venom", "install.json");
+  if (!existsSync(recPath)) {
+    console.error(red("No Venom install found here. Run `venom init` first."));
+    process.exitCode = 1;
+    return;
+  }
+  const rec = JSON.parse(readFileSync(recPath, "utf8"));
+  const toolId = typeof rec.tool === "string" ? rec.tool : "claude-code";
+  let plan;
+  try {
+    plan = resolvePreset(CORE, Object.keys(packs.roles), toolId, preset);
+  } catch (err) {
+    console.error(red(err instanceof Error ? err.message : String(err)));
+    process.exitCode = 1;
+    return;
+  }
+
+  const charterPath = join(targetDir, "CHARTER.md");
+  const charterContent = existsSync(charterPath) ? readFileSync(charterPath, "utf8") : "";
+  const adapter = await loadAdapter(PKG_ROOT, toolId);
+  adapter.install({
+    coreDir: CORE,
+    targetDir,
+    pack: rec.pack,
+    charterContent,
+    version: readVersion(),
+    extraRoles: rec.extraRoles ?? [],
+    removeRoles: rec.removeRoles ?? [],
+    modelByRole: plan.modelByRole,
+    preset: plan.preset,
+  });
+
+  const info = ADAPTERS.find((a) => a.id === toolId);
+  if (plan.perRole) {
+    console.log(green(`  ✓ Applied the ${bold(preset)} model preset — per-role models updated in .claude/agents/.`));
+  } else {
+    console.log(green(`  ✓ Recorded the ${bold(preset)} preset.`) + dim(` ${info?.name ?? toolId} uses one model per session — run it with ${plan.sessionModel}.`));
+  }
 }
 
 async function cmdAdd(args: Args): Promise<void> {
@@ -275,6 +353,7 @@ async function main(): Promise<void> {
   if (cmd === "list") return cmdList();
   if (cmd === "add") return cmdAdd(args);
   if (cmd === "tokens") return cmdTokens(args);
+  if (cmd === "models") return cmdModels(args);
   console.error(red(`Unknown command "${cmd}".`));
   console.log(HELP);
   process.exitCode = 1;

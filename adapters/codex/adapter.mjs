@@ -106,7 +106,7 @@ export function install(opts) {
   const {
     coreDir, targetDir, pack, charterContent,
     projectName = "This project", extraRoles = [], removeRoles = [],
-    force = false, version = "0.0.0", now,
+    force = false, version = "0.0.0", now, preset = "",
   } = opts;
 
   const warnings = [];
@@ -186,6 +186,7 @@ export function install(opts) {
     tool: "codex",
     version,
     pack,
+    preset,
     roles,
     extraRoles,
     removeRoles,
