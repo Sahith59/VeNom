@@ -39,8 +39,9 @@ flowchart LR
 All three also write the shared, tool-agnostic surfaces: `CHARTER.md`, `agent-memory/`, and
 `.venom/`. Each adapter maps the same core onto that tool's **native** primitives — Claude Code's
 subagents, Codex's `AGENTS.md`, Gemini's `GEMINI.md` + slash-commands — and each adapter's README
-notes exactly where a tool's mechanism differs (e.g. Claude Code enforces the read-only gates by
-tool permission; Codex and Gemini carry that constraint as instruction plus the tool's own sandbox).
+notes exactly where a tool's mechanism differs (e.g. Claude Code trims each role's tools — the
+`critics`/`security` gates get no Edit/Write, the advisors no Bash; Codex and Gemini carry that
+constraint as instruction plus the tool's own sandbox).
 
 The agent specs never contain tool syntax or project specifics — a project's details live only in
 the generated `CHARTER.md`, which every agent reads at runtime. Adapters ship as plain ESM + JSON

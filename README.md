@@ -170,8 +170,8 @@ venom/
 Project specifics live only in the generated `CHARTER.md`; the agent specs stay generic and read the
 Charter at runtime. Each adapter maps that one core onto its tool's **native** primitives — so the
 team is real in each, and each adapter's README notes exactly where a tool's mechanism differs (e.g.
-Claude Code enforces the read-only gates by tool permission; Codex and Gemini carry that as
-instruction plus the tool's own sandbox). Adapters ship as plain ESM + JSON with no build step — so
+Claude Code trims each role's tools — the `critics`/`security` gates get no Edit/Write; Codex and
+Gemini carry that as instruction plus the tool's own sandbox). Adapters ship as plain ESM + JSON with no build step — so
 adding a tool is one file, not a rewrite.
 
 **Deeper diagrams** — the core↔adapter mapping, how agents coordinate through shared memory, and the

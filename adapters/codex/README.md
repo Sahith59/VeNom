@@ -38,8 +38,8 @@ codex --sandbox workspace-write --ask-for-approval on-request
 ## Honest fidelity note
 
 Claude Code has first-class subagents and per-role tool permissions, so on Claude Code the read-only
-gates (`critics`, `security`) and the no-execution advisors (`threat-modeler`, `pentester-advisor`)
-are **enforced** by the tool. Codex has no per-role permission layer, so here those limits are carried
+gates (`critics`, `security`) get **no Edit/Write** and the no-execution advisors (`threat-modeler`,
+`pentester-advisor`) get **no Bash** — trimmed at the tool level. Codex has no per-role permission layer, so here those limits are carried
 as explicit **instructions** in `AGENTS.md` and each spec, backed by Codex's own sandbox and approval
 flags. Same team and same protocol — mapped honestly onto what Codex actually provides.
 

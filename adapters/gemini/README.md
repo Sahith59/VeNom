@@ -42,8 +42,8 @@ consider `gemini --sandbox` to isolate file and network side-effects.
 ## Honest fidelity note
 
 Claude Code has first-class subagents and per-role tool permissions, so on Claude Code the read-only
-gates (`critics`, `security`) and the no-execution advisors (`threat-modeler`, `pentester-advisor`)
-are **enforced** by the tool. Gemini's tool settings are session-wide, not per-command, so here those
+gates (`critics`, `security`) get **no Edit/Write** and the no-execution advisors (`threat-modeler`,
+`pentester-advisor`) get **no Bash** — trimmed at the tool level. Gemini's tool settings are session-wide, not per-command, so here those
 limits are carried as explicit **instructions** in each role's prompt and in `GEMINI.md`, backed by
 Gemini's approval prompts and sandbox. Same team and same protocol — mapped honestly onto Gemini.
 
