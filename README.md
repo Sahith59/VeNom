@@ -1,0 +1,224 @@
+# Venom
+
+**Give any coding-agent user a whole company of specialists instead of one generalist.**
+
+Venom scaffolds a named team of role-based AI agents — a boss, researchers, developers, reviewers, a
+security auditor — with shared, persistent memory, into any project. One command drops the team in;
+you drive it through your coding agent.
+
+[![npm](https://img.shields.io/npm/v/venomkit.svg)](https://www.npmjs.com/package/venomkit)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D18.17-brightgreen.svg)](https://nodejs.org)
+[![deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](package.json)
+
+---
+
+## The honest pitch
+
+A single coding agent is **one generalist**: it forgets between sessions, reviews its own work, and
+holds one perspective.
+
+Venom gives you a **team**: specialized roles, independent review gates a generalist skips, and a
+memory that persists across sessions and survives context resets. So you **catch more, forget less,
+and work with more rigor.**
+
+That's the whole claim. No "10x", no magic — just structure a solo agent doesn't have. The honesty is
+the point: it's why you can trust the parts Venom *does* do.
+
+## Quickstart
+
+```bash
+cd your-project
+npx venomkit init
+```
+
+`init` asks what kind of work you do and a couple of plain questions, fills a project **Charter**,
+writes the memory scaffold, and installs the agents where your coding tool looks for them — in under a
+minute, no config editing. Then open the project in your coding agent and give **boss-1** your first
+goal.
+
+> **Requirements:** a coding agent you already use — **[Claude Code](https://claude.com/claude-code)**
+> today (Codex and Gemini adapters are coming next) — and **Node.js ≥ 18.17**. Venom is for developers
+> comfortable in a terminal; it doesn't try to be a no-terminal GUI.
+
+```mermaid
+flowchart LR
+    A(["npx venomkit init"]) --> B["detect your<br/>coding tool"] --> C["pick a pack"] --> D["3-4 plain<br/>questions"] --> E["fill CHARTER.md"] --> F["install the team"] --> G([" ready in under a minute "])
+```
+
+## What gets installed
+
+```
+your-project/
+├── CHARTER.md            # your project's constitution — identity, non-negotiables, scope (yours to edit)
+├── CLAUDE.md             # briefs your lead session to operate as boss-1, and loads the Charter
+├── .claude/
+│   ├── agents/           # your team, as individual agent files
+│   └── settings.json     # safe permissions (allow reads · ask before impact · deny danger)
+├── agent-memory/         # the team's shared, persistent memory (SNAPSHOT, logs, lessons, ADRs)
+└── .venom/
+    ├── workflow.md       # your guide to driving the team
+    └── install.json      # install record (pack, roles, version) — used by re-init and `add`
+```
+
+Nothing is clobbered on re-run: your `CHARTER.md`, your own notes in `CLAUDE.md`, your existing
+`settings.json` rules, and your live `agent-memory/` are all preserved.
+
+## The two ideas that make it a team (not a pile of prompts)
+
+1. **Shared, persistent memory.** Agents don't chat live — they coordinate through files under
+   `agent-memory/`, read before acting and written after. One agent's result becomes the next agent's
+   starting point, and it all survives a context reset. Governing rule: *write everything, read
+   selectively.*
+2. **Two independent review gates.** Before anything is called done, it passes **critics**
+   (correctness + your Charter's non-negotiables) and **security** (exploitability) — both read-only,
+   both must pass. They flag and block; they never fix. You make the final call.
+
+## Packs — pick the team that fits your work
+
+Every pack ships the same core four (`boss-1`, `boss-2`, `critics`, `security`) plus the full memory
+tier. They differ only in the specialists:
+
+```mermaid
+flowchart TD
+    CORE["🧩 Core — in every pack<br/>boss-1 · boss-2 · critics · security<br/>+ shared persistent memory"]
+    CORE --> P1["web-app · 14<br/>full software team"]
+    CORE --> P2["data-ml · 12<br/>data + models"]
+    CORE --> P3["research-academic · 10<br/>advisory research room"]
+    CORE --> P4["writing-content · 9<br/>writing room"]
+    CORE --> P5["security-audit · 8<br/>threat modeling + audit"]
+    CORE --> P6["solo-minimal · 8<br/>lightest team"]
+```
+
+| Pack | Agents | Best for |
+|------|:------:|----------|
+| **web-app** _(default)_ | 14 | Web apps, APIs, CLIs, general software |
+| **data-ml** | 12 | Data pipelines, ETL, model training & evaluation |
+| **research-academic** | 10 | Literature reviews, study design, rigorous written research |
+| **writing-content** | 9 | Articles and docs where the claims must hold up |
+| **security-audit** | 8 | Security reviews and audits of an existing codebase |
+| **solo-minimal** | 8 | A solo dev who wants review + memory without the full org |
+
+```bash
+npx venomkit list            # see the packs and roles
+npx venomkit init --pack solo-minimal
+```
+
+## How you drive the team
+
+You talk to **boss-1** — one point of contact, not the whole roster. You give it a goal and set the
+**leash** (how much autonomy to take); it decomposes the goal, delegates to the right specialists,
+runs the review gates, and brings back **one reconciled recommendation**. You approve what matters.
+
+The full daily-use guide — the leash, the gates, the quality loops, a troubleshooting table, and what
+to expect — is installed at **`.venom/workflow.md`**.
+
+Behind that one conversation, the whole team is at work:
+
+```mermaid
+flowchart TD
+    You["👤 You — the owner"]
+    You -->|"goal + the leash (how much autonomy)"| B1["boss-1<br/>orchestrator"]
+    B1 -->|"one reconciled recommendation"| You
+    B1 <-->|"audits the big calls"| B2["boss-2<br/>independent auditor"]
+    B1 --> RH["research-head"]
+    B1 --> DH["dev-head"]
+    RH --> RES["researchers"]
+    DH --> BLD["developers · testing<br/>debugger · design · docs"]
+    BLD -->|"finished work"| CR["critics<br/>correctness + trust"]
+    BLD -->|"finished work"| SE["security<br/>exploitability"]
+    CR -->|"BLOCK → back to build"| DH
+    SE -->|"BLOCK → back to build"| DH
+    CR -->|"PASS"| B1
+    SE -->|"PASS"| B1
+```
+
+Only the bosses talk to you; the gates and boss-2 report to boss-1 directly. **Both gates must be
+green before anything ships** — and you make the final call.
+
+## What Venom is NOT (so you can trust what it is)
+
+- **Not an autonomous company that runs while you sleep.** Today's tools can't deliver reliable
+  unsupervised multi-agent autonomy, and Venom doesn't pretend to. You're the driver.
+- **Not a productivity-multiplier with a number.** It gives you structure, review, and memory — not a
+  guaranteed multiple.
+- **Not infallible.** The gates make the work more rigorous, not perfect. The final call is always
+  yours.
+
+## How it works
+
+A **tool-agnostic core** holds the value — the agent roles (portable Markdown), the memory protocol,
+the workflow, and the packs. Thin **per-tool adapters** map that core into whatever a specific coding
+tool expects. This is what lets one framework target many tools without rewriting the brain.
+
+```
+venom/
+├── core/            # tool-agnostic: agents/, memory-template/, workflow.md, packs.json, CHARTER_TEMPLATE.md
+├── adapters/
+│   └── claude-code/ # v1: fully working. Renders core → .claude/agents/ + settings.json
+├── bin/             # the venom CLI entry
+└── src/             # the CLI (TypeScript → dist/; zero runtime dependencies)
+```
+
+Project specifics live only in the generated `CHARTER.md`; the agent specs stay generic and read the
+Charter at runtime. Adapters ship as plain ESM + JSON with no build step — so adding a tool is one
+file, not a rewrite.
+
+**Deeper diagrams** — the core↔adapter mapping, how agents coordinate through shared memory, and the
+review loop — are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## The roster
+
+**Core (every pack):** `boss-1` (orchestrator) · `boss-2` (independent auditor) · `critics`
+(correctness/trust gate) · `security` (exploitability gate).
+
+**Specialists (assembled per pack):** `research-head` · `dev-head` · `tech-researcher` ·
+`domain-researcher` · `developer-1` · `developer-2` · `testing` · `debugger` · `design` ·
+`technical-writer` · `data-engineer` · `ml-engineer` · `literature-reviewer` · `methodologist` ·
+`editor` · `fact-checker` · `threat-modeler` · `pentester-advisor`. Plus an optional `marketing`
+add-on (`venom add marketing`).
+
+## CLI reference
+
+```
+venom init [options]      Install a team into the current project
+venom list                Show the available packs and roles
+venom add <role>          Add an optional role to an existing install
+venom --version           Print the version
+venom --help              Full help
+
+init options:
+  --pack <id>             web-app | data-ml | research-academic | writing-content | security-audit | solo-minimal
+  --name <name>           Project name (default: folder name)
+  --one-liner <text>      One-line description of the project
+  --non-negotiables <t>   Rules that must never be broken (separate with ';')
+  --out-of-lane <text>    What the project deliberately won't do
+  --tool <id>             claude-code (default; Codex + Gemini coming soon)
+  --dir <path>            Target directory (default: current)
+  --force                 Overwrite an existing CHARTER.md
+  --yes, -y               Non-interactive: use flags + defaults
+```
+
+## Extend it
+
+Venom is built to be extended:
+
+- **Add a pack** — one entry in `core/packs.json` referencing existing roles.
+- **Add a role** — a portable spec in `core/agents/` plus a manifest entry per adapter.
+- **Add a tool adapter** — one self-contained ESM module (see `adapters/claude-code/README.md`).
+
+See the wiring diagram in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#wire-it-to-your-needs)** and the
+full steps in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Development
+
+```bash
+git clone <this-repo> && cd venomkit
+npm install          # dev-only deps (TypeScript); the published package has zero runtime deps
+npm test             # builds, then runs the adapter + CLI test suites
+npm run build        # compile the CLI to dist/
+```
+
+## License
+
+[MIT](LICENSE).
