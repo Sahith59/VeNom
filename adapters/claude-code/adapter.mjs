@@ -24,6 +24,8 @@ export const meta = {
   name: "Claude Code",
   agentsDir: ".claude/agents",
   settingsPath: ".claude/settings.json",
+  startHint:
+    "Open this project in Claude Code and give BOSS-1 your first goal — the lead session operates as BOSS-1 per CLAUDE.md, and each role is a subagent in .claude/agents/.",
   // Heuristic the CLI can use to auto-detect this tool in a project.
   detect(targetDir) {
     return existsSync(join(targetDir, ".claude")) || existsSync(join(targetDir, "CLAUDE.md"));
@@ -32,6 +34,10 @@ export const meta = {
 
 const VENOM_BEGIN = "<!-- VENOM:BEGIN";
 const VENOM_END = "<!-- VENOM:END -->";
+
+// Role names become path segments (.claude/agents/<role>.md) and must be safe slugs, so a crafted
+// pack or a tampered install.json can never traverse out of the managed directory.
+const SAFE_ROLE = /^[a-z0-9][a-z0-9-]*$/;
 
 function yamlString(s) {
   return '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
@@ -142,8 +148,9 @@ export function install(opts) {
   const roles = uniq([...packs.core, ...packs.packs[pack].adds, ...extraRoles])
     .filter((r) => !removeRoles.includes(r));
 
-  // Validate every role has both a spec file and a manifest entry before we write anything.
+  // Validate every role is a safe slug with both a spec file and a manifest entry before writing.
   for (const r of roles) {
+    if (!SAFE_ROLE.test(r)) throw new Error(`unsafe role name "${r}" — role names must match ${SAFE_ROLE}`);
     if (!existsSync(join(coreDir, "agents", `${r}.md`))) throw new Error(`role "${r}" has no spec at core/agents/${r}.md`);
     if (!manifest.agents[r]) throw new Error(`role "${r}" has no entry in the Claude Code manifest`);
   }
@@ -157,10 +164,10 @@ export function install(opts) {
     try {
       const prev = JSON.parse(readFileSync(installRecordPath, "utf8"));
       for (const r of prev.managedAgents || []) {
-        if (!roles.includes(r)) {
-          const stale = join(agentsDir, `${r}.md`);
-          if (existsSync(stale)) rmSync(stale);
-        }
+        if (roles.includes(r)) continue;
+        if (!SAFE_ROLE.test(r)) { warnings.push(`skipped cleanup of suspicious managed entry "${r}"`); continue; }
+        const stale = join(agentsDir, `${r}.md`);
+        if (existsSync(stale)) rmSync(stale);
       }
     } catch {
       warnings.push("could not read previous .venom/install.json; skipped stale-agent cleanup");
@@ -214,11 +221,21 @@ export function install(opts) {
   };
   writeFileSync(installRecordPath, JSON.stringify(record, null, 2) + "\n");
 
+  const layout = [
+    { label: "agents", path: ".claude/agents/", note: roles.join(", ") },
+    { label: "charter", path: "CHARTER.md", note: charterAction },
+    { label: "brief", path: "CLAUDE.md", note: claudeAction },
+    { label: "perms", path: ".claude/settings.json", note: settingsAction },
+    { label: "memory", path: "agent-memory/", note: "" },
+    { label: "guide", path: ".venom/workflow.md", note: "" },
+  ];
+
   return {
     roles,
     agentsWritten: roles.length,
     actions: { settings: settingsAction, charter: charterAction, claudeMd: claudeAction },
     warnings,
+    layout,
   };
 }
 

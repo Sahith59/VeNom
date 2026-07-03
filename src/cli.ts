@@ -68,12 +68,12 @@ ${bold("init options")}
   --one-liner <text>        One-line description of the project
   --non-negotiables <text>  Rules that must never be broken (separate with ';')
   --out-of-lane <text>      What the project deliberately will not do
-  --tool <id>               claude-code (default; Codex + Gemini coming soon)
+  --tool <id>               claude-code (default) | codex | gemini  (auto-detected if omitted)
   --dir <path>              Target project directory (default: current)
   --force                   Overwrite an existing CHARTER.md
   --yes, -y                 Non-interactive: use flags + defaults, no prompts
 
-Runs with Claude Code today. Codex and Gemini adapters are coming next.
+Works with Claude Code, Codex, and Gemini CLI.
 `;
 
 async function cmdInit(args: Args): Promise<void> {
@@ -89,14 +89,28 @@ async function cmdInit(args: Args): Promise<void> {
     return;
   }
   if (adapterInfo.status !== "ready") {
-    console.error(yellow(`The ${adapterInfo.name} adapter is coming soon — v1 runs with Claude Code.`));
+    const ready = ADAPTERS.filter((a) => a.status === "ready").map((a) => a.id).join(", ");
+    console.error(yellow(`The ${adapterInfo.name} adapter isn't ready yet. Available: ${ready}.`));
     process.exitCode = 1;
     return;
   }
 
   console.log(bold(`\n  Venom — scaffolding your team for ${adapterInfo.name}`));
-  if (existsSync(join(targetDir, ".venom", "install.json"))) {
+  const recPath = join(targetDir, ".venom", "install.json");
+  if (existsSync(recPath)) {
     console.log(dim("  Re-initializing — your existing CHARTER.md and agent-memory/ are preserved."));
+    let priorTool: string | undefined;
+    try {
+      priorTool = JSON.parse(readFileSync(recPath, "utf8")).tool;
+    } catch {
+      /* ignore an unreadable record */
+    }
+    if (priorTool && priorTool !== toolId) {
+      const prior = ADAPTERS.find((a) => a.id === priorTool);
+      console.log(
+        yellow(`  ! Switching tool from ${prior?.name ?? priorTool} to ${adapterInfo.name}. The previous tool's files are left in place — remove them by hand if you don't want both installed.`),
+      );
+    }
   }
 
   let pack = typeof args.pack === "string" ? args.pack : packs.defaultPack;
@@ -141,19 +155,19 @@ async function cmdInit(args: Args): Promise<void> {
     force: Boolean(args.force),
   });
 
-  console.log(green(`\n  ✓ Installed ${res.agentsWritten} agents — the ${bold(packs.packs[pack].name)} team.\n`));
-  console.log(`  ${dim("agents ")} .claude/agents/  ${dim(`(${res.roles.join(", ")})`)}`);
-  console.log(`  ${dim("charter")} CHARTER.md  ${dim(res.actions.charter ?? "")}`);
-  console.log(`  ${dim("brief  ")} CLAUDE.md  ${dim(res.actions.claudeMd ?? "")}`);
-  console.log(`  ${dim("perms  ")} .claude/settings.json  ${dim(res.actions.settings ?? "")}`);
-  console.log(`  ${dim("memory ")} agent-memory/`);
-  console.log(`  ${dim("guide  ")} .venom/workflow.md`);
+  console.log(green(`\n  ✓ Installed the ${bold(packs.packs[pack].name)} team — ${res.agentsWritten} agents for ${adapterInfo.name}.\n`));
+  const layout: Array<{ label: string; path: string; note?: string }> = Array.isArray(res.layout) ? res.layout : [];
+  for (const item of layout) {
+    const note = item.note ? dim(`  ${item.note}`) : "";
+    console.log(`  ${dim(item.label.padEnd(8))} ${item.path}${note}`);
+  }
   for (const w of res.warnings) console.log(yellow(`  ! ${w}`));
 
   console.log(bold("\n  Next:"));
   console.log(`  1. Review ${cyan("CHARTER.md")} — sharpen the non-negotiables and scope. It drives every decision.`);
   console.log(`  2. Read ${cyan(".venom/workflow.md")} — how to drive your team (the leash, the gates, the loops).`);
-  console.log(`  3. Open this project in ${adapterInfo.name} and give ${bold("BOSS-1")} your first goal.\n`);
+  const startHint = adapter.meta.startHint ?? `Open this project in ${adapterInfo.name} and give BOSS-1 your first goal.`;
+  console.log(`  3. ${startHint}\n`);
 }
 
 function cmdList(): void {
