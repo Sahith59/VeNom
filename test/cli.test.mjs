@@ -43,6 +43,7 @@ test("cli init (non-interactive) installs a working team and fills the charter",
       "--one-liner", "A payments API", "--non-negotiables", "never log card numbers; fail closed", "--yes",
     ]);
     assert.match(out, /Installed the Solo Minimal team — 8 agents for Claude Code/, "reports the solo-minimal count");
+    assert.match(out, /auto-selected/, "notes the tool was defaulted when --tool is omitted");
 
     assert.ok(existsSync(join(t, ".claude", "agents", "boss-1.md")), "boss-1 installed");
     assert.ok(existsSync(join(t, ".claude", "agents", "developer-1.md")), "developer-1 installed");
@@ -103,6 +104,7 @@ test("cli init --tool codex installs an AGENTS.md team", () => {
   try {
     const out = run(["init", "--dir", t, "--tool", "codex", "--pack", "solo-minimal", "--name", "X", "--yes"]);
     assert.match(out, /Installed the .* team .* for Codex/, "reports a Codex install");
+    assert.ok(!/auto-selected/.test(out), "an explicit --tool shows no auto-select note");
     assert.ok(existsSync(join(t, "AGENTS.md")), "AGENTS.md written");
     assert.ok(existsSync(join(t, ".venom", "agents", "boss-1.md")), "role specs written");
     assert.ok(!existsSync(join(t, ".claude")), "no Claude Code artifacts");

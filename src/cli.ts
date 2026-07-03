@@ -81,7 +81,41 @@ async function cmdInit(args: Args): Promise<void> {
   const packs = loadPacks();
   const packIds = Object.keys(packs.packs);
 
-  const toolId = typeof args.tool === "string" ? args.tool : detectTool(targetDir);
+  // Resolve the tool: an explicit --tool wins; otherwise detect, and let the interactive user confirm.
+  let toolId = typeof args.tool === "string" ? args.tool : detectTool(targetDir);
+  const toolWasExplicit = typeof args.tool === "string";
+
+  let pack = typeof args.pack === "string" ? args.pack : packs.defaultPack;
+  let projectName = typeof args.name === "string" ? args.name : basename(targetDir);
+  let oneLiner = typeof args["one-liner"] === "string" ? (args["one-liner"] as string) : "";
+  let nonNegotiables = typeof args["non-negotiables"] === "string" ? (args["non-negotiables"] as string) : "";
+  let outOfLane = typeof args["out-of-lane"] === "string" ? (args["out-of-lane"] as string) : "";
+
+  console.log(bold("\n  Venom — let's set up your agent team.\n"));
+
+  if (isInteractive() && !args.yes) {
+    if (!toolWasExplicit) {
+      toolId = await select(
+        "Which coding tool are you using?",
+        ADAPTERS.map((a) => ({ value: a.id, label: a.name + (a.id === toolId ? " (detected)" : "") })),
+        Math.max(0, ADAPTERS.findIndex((a) => a.id === toolId)),
+      );
+    }
+    pack = await select(
+      "What kind of work is this?",
+      packIds.map((id) => ({
+        value: id,
+        label: packs.packs[id].name + (id === packs.defaultPack ? " (default)" : ""),
+        hint: packs.packs[id].bestFor,
+      })),
+      Math.max(0, packIds.indexOf(pack)),
+    );
+    projectName = await text("Project name", projectName);
+    oneLiner = await text("One-line description (what is this project?)", oneLiner);
+    nonNegotiables = await text("Non-negotiables — rules that must never be broken (separate with ';')", nonNegotiables);
+    outOfLane = await text("Out of scope — what this project deliberately won't do (optional)", outOfLane);
+  }
+
   const adapterInfo = ADAPTERS.find((a) => a.id === toolId);
   if (!adapterInfo) {
     console.error(red(`Unknown tool "${toolId}". Available: ${ADAPTERS.map((a) => a.id).join(", ")}`));
@@ -95,7 +129,11 @@ async function cmdInit(args: Args): Promise<void> {
     return;
   }
 
-  console.log(bold(`\n  Venom — scaffolding your team for ${adapterInfo.name}`));
+  console.log(bold(`  Scaffolding your team for ${adapterInfo.name}.`));
+  if (!toolWasExplicit && (!isInteractive() || Boolean(args.yes))) {
+    console.log(dim("  (auto-selected — pass --tool claude-code|codex|gemini to choose a different one)"));
+  }
+
   const recPath = join(targetDir, ".venom", "install.json");
   let priorExtraRoles: string[] = [];
   let priorRemoveRoles: string[] = [];
@@ -115,28 +153,6 @@ async function cmdInit(args: Args): Promise<void> {
     } catch {
       /* ignore an unreadable record */
     }
-  }
-
-  let pack = typeof args.pack === "string" ? args.pack : packs.defaultPack;
-  let projectName = typeof args.name === "string" ? args.name : basename(targetDir);
-  let oneLiner = typeof args["one-liner"] === "string" ? (args["one-liner"] as string) : "";
-  let nonNegotiables = typeof args["non-negotiables"] === "string" ? (args["non-negotiables"] as string) : "";
-  let outOfLane = typeof args["out-of-lane"] === "string" ? (args["out-of-lane"] as string) : "";
-
-  if (isInteractive() && !args.yes) {
-    pack = await select(
-      "What kind of work is this?",
-      packIds.map((id) => ({
-        value: id,
-        label: packs.packs[id].name + (id === packs.defaultPack ? " (default)" : ""),
-        hint: packs.packs[id].bestFor,
-      })),
-      Math.max(0, packIds.indexOf(packs.defaultPack)),
-    );
-    projectName = await text("Project name", projectName);
-    oneLiner = await text("One-line description (what is this project?)", oneLiner);
-    nonNegotiables = await text("Non-negotiables — rules that must never be broken (separate with ';')", nonNegotiables);
-    outOfLane = await text("Out of scope — what this project deliberately won't do (optional)", outOfLane);
   }
 
   if (!packs.packs[pack]) {

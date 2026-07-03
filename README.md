@@ -32,10 +32,16 @@ cd your-project
 npx venomkit init
 ```
 
-`init` asks what kind of work you do and a couple of plain questions, fills a project **Charter**,
-writes the memory scaffold, and installs the agents where your coding tool looks for them — in under a
-minute, no config editing. Then open the project in your coding agent and give **boss-1** your first
-goal.
+`init` asks **which coding tool you use** (Claude Code, Codex, or Gemini) and what kind of work you
+do, fills a project **Charter**, writes the memory scaffold, and installs the agents where that tool
+looks for them — in under a minute, no config editing. Then open the project in that tool and give
+**boss-1** your first goal.
+
+Prefer non-interactive? Name the tool and pack directly:
+
+```bash
+npx venomkit init --tool codex --pack web-app --yes   # or --tool gemini / claude-code
+```
 
 > **Requirements:** a coding agent you already use — **[Claude Code](https://claude.com/claude-code)**,
 > **[Codex](https://github.com/openai/codex)**, or **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** —
