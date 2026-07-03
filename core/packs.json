@@ -1,0 +1,243 @@
+{
+  "description": "Venom role packs. `init` asks what kind of work you do and assembles the right team over the SAME core four + the full memory tier. A pack = the specialists added on top of `core`. This file is tool-agnostic; per-tool model/tool wiring lives in each adapter's manifest. To add a pack (the community extension point): add an entry under `packs` whose `adds` reference roles in `roles`. Users can also start from a pack and add/remove individual roles (e.g. the optional `marketing`).",
+  "version": 1,
+  "core": [
+    "boss-1",
+    "boss-2",
+    "critics",
+    "security"
+  ],
+  "coreNote": "These four + the full agent-memory/ tier are installed with EVERY pack. boss-1 (orchestrator) and boss-2 (independent auditor) are the only agents that talk to the owner; critics and security are the two read-only gates.",
+  "defaultPack": "web-app",
+  "packs": {
+    "web-app": {
+      "name": "Web / App Development",
+      "default": true,
+      "description": "The full software-builder team — research, two parallel builders, testing, debugging, design, and docs.",
+      "bestFor": "Web apps, APIs, CLIs, and general software projects.",
+      "adds": [
+        "research-head",
+        "dev-head",
+        "tech-researcher",
+        "domain-researcher",
+        "developer-1",
+        "developer-2",
+        "testing",
+        "debugger",
+        "design",
+        "technical-writer"
+      ]
+    },
+    "data-ml": {
+      "name": "Data / ML",
+      "description": "Pipelines and models with honest evaluation — the generic developers and design are dropped for domain-specific builders.",
+      "bestFor": "Data pipelines, ETL, and model training/evaluation.",
+      "adds": [
+        "research-head",
+        "dev-head",
+        "tech-researcher",
+        "data-engineer",
+        "ml-engineer",
+        "testing",
+        "debugger",
+        "technical-writer"
+      ]
+    },
+    "research-academic": {
+      "name": "Research / Academic",
+      "description": "An advisory research room — surveys prior work, designs sound methods, and writes; no code builders.",
+      "bestFor": "Literature reviews, study/experiment design, and rigorous written research.",
+      "adds": [
+        "research-head",
+        "tech-researcher",
+        "domain-researcher",
+        "literature-reviewer",
+        "methodologist",
+        "technical-writer"
+      ]
+    },
+    "writing-content": {
+      "name": "Writing / Content",
+      "description": "A writing room — research, drafting, editing, and fact-checking against sources.",
+      "bestFor": "Articles, documentation, and content where the claims must hold up.",
+      "adds": [
+        "research-head",
+        "domain-researcher",
+        "technical-writer",
+        "editor",
+        "fact-checker"
+      ]
+    },
+    "security-audit": {
+      "name": "Security / Audit",
+      "description": "Security-first — threat modeling and authorized-testing advice, with the security gate leading the review.",
+      "bestFor": "Security reviews and audits of an existing codebase.",
+      "elevate": [
+        "security"
+      ],
+      "elevateNote": "The `security` gate is the primary reviewer here, backed by the threat-modeler and pentester-advisor. The pentester-advisor never advises on active testing without the owner's explicit, documented authorization.",
+      "adds": [
+        "tech-researcher",
+        "threat-modeler",
+        "pentester-advisor",
+        "technical-writer"
+      ]
+    },
+    "solo-minimal": {
+      "name": "Solo Minimal",
+      "description": "The lightest team — one builder, testing, docs, plus the core four gates and memory. Lowest token cost.",
+      "bestFor": "A solo developer who wants review + persistent memory without the full org.",
+      "adds": [
+        "dev-head",
+        "developer-1",
+        "testing",
+        "technical-writer"
+      ]
+    }
+  },
+  "roles": {
+    "boss-1": {
+      "team": "orchestration",
+      "title": "Primary Orchestrator",
+      "summary": "The single agent you talk to; decomposes goals, delegates, integrates, and brings one reconciled recommendation.",
+      "reportsTo": "owner"
+    },
+    "boss-2": {
+      "team": "review",
+      "title": "Independent Auditor",
+      "summary": "A second, independent take on expensive-to-be-wrong decisions before they reach you.",
+      "reportsTo": "boss-1"
+    },
+    "critics": {
+      "team": "review",
+      "title": "Correctness & Trust Gate",
+      "summary": "Read-only. PASS/BLOCK against the Charter's non-negotiables and past lessons.",
+      "reportsTo": "boss-1"
+    },
+    "security": {
+      "team": "review",
+      "title": "Exploitability Gate",
+      "summary": "Read-only. Audits code for secrets, injection, auth/authz holes, dependency vulns, and whether the project's trust promises hold.",
+      "reportsTo": "boss-1"
+    },
+    "research-head": {
+      "team": "research",
+      "title": "Head of Research",
+      "summary": "Routes research questions, makes researchers coordinate, and synthesizes one decision-ready briefing.",
+      "reportsTo": "boss-1"
+    },
+    "dev-head": {
+      "team": "dev",
+      "title": "Head of Development",
+      "summary": "Turns build goals into shipped, tested, reviewed work; runs the build/test/debug loop and routes through both gates.",
+      "reportsTo": "boss-1"
+    },
+    "tech-researcher": {
+      "team": "research",
+      "title": "Technical Researcher",
+      "summary": "'How do we build X well?' — best practices, the right library/pattern, real tradeoffs, always cited.",
+      "reportsTo": "research-head",
+      "reportsToFallback": "boss-1"
+    },
+    "domain-researcher": {
+      "team": "research",
+      "title": "Domain & Market Researcher",
+      "summary": "The real need, what already exists, the gaps — scope-shaping, and gated by critics against the Charter.",
+      "reportsTo": "research-head"
+    },
+    "developer-1": {
+      "team": "dev",
+      "title": "Senior Production Developer",
+      "summary": "Ships durable code — load, failure, edge cases, security — never a happy-path demo.",
+      "reportsTo": "dev-head"
+    },
+    "developer-2": {
+      "team": "dev",
+      "title": "Senior Production Developer (peer)",
+      "summary": "Peer to developer-1; its own git worktree and surface when building in parallel.",
+      "reportsTo": "dev-head"
+    },
+    "testing": {
+      "team": "dev",
+      "title": "Testing",
+      "summary": "Writes tests that try to break the work; holds the project's test bar; proves the Charter's invariants.",
+      "reportsTo": "dev-head"
+    },
+    "debugger": {
+      "team": "dev",
+      "title": "Debugger & Durability Skeptic",
+      "summary": "Finds real root causes and flags happy-path shortcuts so builders write durable code by habit.",
+      "reportsTo": "dev-head"
+    },
+    "design": {
+      "team": "dev",
+      "title": "UI/UX Design",
+      "summary": "Bound first by the project's own design guidance in the Charter, and only secondarily by market trends.",
+      "reportsTo": "dev-head"
+    },
+    "technical-writer": {
+      "team": "dev",
+      "title": "Technical Writer",
+      "summary": "Clear, honest documentation verified against the code; never documents a capability the code lacks.",
+      "reportsTo": "dev-head",
+      "reportsToFallback": "boss-1"
+    },
+    "data-engineer": {
+      "team": "dev",
+      "title": "Data Engineer",
+      "summary": "Robust pipelines/ETL and data quality that survive dirty data, schema drift, and scale.",
+      "reportsTo": "dev-head"
+    },
+    "ml-engineer": {
+      "team": "dev",
+      "title": "ML Engineer",
+      "summary": "Honestly-evaluated, reproducible models — no leakage, real baselines, documented failure modes.",
+      "reportsTo": "dev-head"
+    },
+    "literature-reviewer": {
+      "team": "research",
+      "title": "Literature Reviewer",
+      "summary": "Surveys prior work and tracks citations honestly; every claim traceable to a real source.",
+      "reportsTo": "research-head"
+    },
+    "methodologist": {
+      "team": "research",
+      "title": "Methodologist",
+      "summary": "Experiment design and statistical rigor; guards against p-hacking, leakage, and unsupported claims.",
+      "reportsTo": "research-head"
+    },
+    "editor": {
+      "team": "research",
+      "title": "Editor",
+      "summary": "Structure, clarity, and voice — without changing meaning or introducing new claims.",
+      "reportsTo": "research-head"
+    },
+    "fact-checker": {
+      "team": "research",
+      "title": "Fact-Checker",
+      "summary": "The correctness gate for prose — verifies every claim against a real source; blocks the unsupported.",
+      "reportsTo": "research-head"
+    },
+    "threat-modeler": {
+      "team": "security",
+      "title": "Threat Modeler",
+      "summary": "Maps attack surface and threats to concrete mitigations. Advisory — never runs live attacks.",
+      "reportsTo": "security-line"
+    },
+    "pentester-advisor": {
+      "team": "security",
+      "title": "Penetration-Testing Advisor",
+      "summary": "Advises on test methodology within authorized, documented scope; the human executes, never the advisor.",
+      "reportsTo": "security-line"
+    },
+    "marketing": {
+      "team": "research",
+      "title": "Real-User Signal & Growth",
+      "summary": "Optional add-on. Surfaces real user pain from public communities; reads signal, never spams or impersonates.",
+      "optional": true,
+      "reportsTo": "research-head",
+      "reportsToFallback": "boss-1"
+    }
+  },
+  "headsAreOptional": "Some lighter packs do not staff a research-head or dev-head. When a pack omits a head, boss-1 manages those specialists directly, and any role with a reportsToFallback reports to that fallback (boss-1). threat-modeler and pentester-advisor report up the security line to boss-1/security and need no head."
+}
