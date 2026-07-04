@@ -266,15 +266,18 @@ test("cli: --keep=N and --dir=PATH (equals form) are honored, not silently defau
   }
 });
 
-test("cli: compact rejects --keep with no numeric value (e.g. --keep -5)", () => {
+test("cli: compact rejects --keep with no/empty/dashed value (never silently archives everything)", () => {
   const dir = mkdtempSync(join(tmpdir(), "venom-m3kv-"));
   try {
     run(["init", "--dir", dir, "--tool", "claude-code", "--pack", "solo-minimal", "--name", "KV", "--yes"]);
-    try {
-      run(["memory", "compact", "--dir", dir, "--keep", "-5"]);
-      assert.fail("should reject --keep -5");
-    } catch (e) {
-      assert.match(String(e.stderr || e.message), /numeric value/);
+    for (const bad of ["-5", "="]) {
+      const args = bad === "=" ? ["memory", "compact", "--dir", dir, "--keep="] : ["memory", "compact", "--dir", dir, "--keep", bad];
+      try {
+        run(args);
+        assert.fail(`should reject --keep ${bad}`);
+      } catch (e) {
+        assert.match(String(e.stderr || e.message), /numeric value/, `--keep ${bad} rejected`);
+      }
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

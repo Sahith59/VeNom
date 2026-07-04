@@ -331,9 +331,9 @@ function cmdMemory(args: Args): void {
     return;
   }
   if (sub === "compact") {
-    // A dash-prefixed or missing value (e.g. `--keep -5`, `--keep`) parses to boolean true — catch it
-    // so the bound isn't silently dropped back to the default.
-    if (args.keep === true || args.budget === true) {
+    // A dash-prefixed, missing (`--keep`), or empty (`--keep=`) value must not be silently reinterpreted
+    // — bare/dashed parses to boolean true; empty parses to "" which Number()s to a surprising 0.
+    if (args.keep === true || args.budget === true || args.keep === "" || args.budget === "") {
       console.error(red("--keep and --budget each need a numeric value, e.g. `--keep 20` or `--budget 2500`."));
       process.exitCode = 1;
       return;
