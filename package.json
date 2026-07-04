@@ -1,6 +1,6 @@
 {
   "name": "venomkit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scaffold a whole team of role-based AI agents with shared, persistent memory into any project — one command, works with your coding agent.",
   "keywords": [
     "ai",

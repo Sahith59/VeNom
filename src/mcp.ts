@@ -2,6 +2,7 @@
 // JSON-RPC 2.0 over stdio, newline-delimited (the MCP stdio transport). No SDK dependency — this keeps
 // runtime deps at zero. stdout carries ONLY protocol messages; everything else goes to stderr.
 import { searchMemory, readMemoryPath, appendEntry, renderStats, renderCompact, loadBudgets } from "./memory.js";
+import { loadRoster, agentBrief, routeTask, logTeamForRole } from "./router.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 // The version this hand-rolled server was actually built and tested against. Per the MCP spec, we echo
@@ -12,6 +13,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = new Set([PROTOCOL_VERSION]);
 export interface ServerCtx {
   memDir: string;
   coreDir: string;
+  projectDir: string;
   version: string;
   now: () => Date;
 }
@@ -139,7 +141,145 @@ export const TOOLS: Tool[] = [
     },
     run: (a, ctx) => stripAnsi(renderCompact(ctx.memDir, { keep: num(a.keep) }, bool(a.write), loadBudgets(ctx.coreDir))),
   },
+  {
+    name: "list_agents",
+    description:
+      "List the agents actually installed in THIS project (from the Venom install record), each with its one-line purpose. Use it to see who you can delegate to. Reflects a custom roster (venom init --roles), not a fixed list. You talk to boss-1; it delegates to the rest.",
+    inputSchema: { type: "object", properties: {} },
+    run: (_a, ctx) => formatRoster(ctx),
+  },
+  {
+    name: "agent_brief",
+    description:
+      "Return one agent's full spec — its persona, mandate, how it works, and the gates it answers to — so you can act as it or brief a subagent with it. Arg: role (e.g. developer-1). Call list_agents for the names.",
+    inputSchema: {
+      type: "object",
+      properties: { role: { type: "string", description: "Role name, e.g. developer-1 or security." } },
+      required: ["role"],
+    },
+    run: (a, ctx) => {
+      const role = str(a.role);
+      if (!role) throw new Error("role is required");
+      return formatBrief(agentBrief(ctx.coreDir, ctx.projectDir, role));
+    },
+  },
+  {
+    name: "route",
+    description:
+      "Given a plain-English task, suggest which of your INSTALLED agents fit and the order to run them. This is an honest keyword/field match over each agent's spec — a shortcut to the likely specialists, NOT a judgment call. boss-1 is your real router; this just narrows the field. Arg: task. Optional: limit (top-N, default 3).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "What you want done, in plain English." },
+        limit: { type: "number", description: "How many candidate agents to return (default 3, max 6)." },
+      },
+      required: ["task"],
+    },
+    run: (a, ctx) => {
+      const task = str(a.task);
+      if (!task) throw new Error("task is required");
+      return formatRoute(routeTask(ctx.coreDir, ctx.projectDir, task, { limit: num(a.limit) }));
+    },
+  },
+  {
+    name: "handoff",
+    description:
+      "Delegate a task to an installed agent: returns that agent's full brief AND records the delegation in shared memory (agent-memory/) so parallel/async work stays traceable. The MCP can't run the agent — you (the host) act on the brief; this makes the dispatch visible. Args: role, task. Optional: by (delegator, default boss-1).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        role: { type: "string", description: "The agent to delegate to, e.g. developer-1." },
+        task: { type: "string", description: "The bounded task you're handing off." },
+        by: { type: "string", description: "Who is delegating (default boss-1)." },
+      },
+      required: ["role", "task"],
+    },
+    run: (a, ctx) => {
+      const role = str(a.role);
+      const task = str(a.task);
+      if (!role) throw new Error("role is required");
+      if (!task) throw new Error("task is required");
+      const roster = loadRoster(ctx.coreDir, ctx.projectDir);
+      if (!roster.roles.some((r) => r.role === role)) {
+        throw new Error(`"${role}" is not installed here. Call list_agents to see the roster, or add it with \`venom add ${role}\`.`);
+      }
+      const by = str(a.by) || "boss-1";
+      const team = logTeamForRole(ctx.coreDir, role);
+      const rec = appendEntry(
+        ctx.memDir,
+        {
+          team,
+          agent: by,
+          title: `Handoff → ${role}`,
+          task,
+          did: `Delegated to ${role} via MCP handoff.`,
+          next: `${role}: act on the brief below, then log your result. critics + security gate before it's done.`,
+        },
+        ctx.now(),
+      );
+      return `Handoff logged — ${rec.ref}\n${rec.header}\n\n${formatBrief(agentBrief(ctx.coreDir, ctx.projectDir, role))}`;
+    },
+  },
 ];
+
+function formatRoster(ctx: ServerCtx): string {
+  const roster = loadRoster(ctx.coreDir, ctx.projectDir);
+  const toolName = { "claude-code": "Claude Code", codex: "Codex", gemini: "Gemini CLI" }[roster.tool] ?? roster.tool;
+  const head = `Installed agents (${roster.roles.length})${roster.pack ? ` — ${roster.pack} pack` : ""}${toolName ? `, ${toolName}` : ""}`;
+  const pad = Math.max(...roster.roles.map((r) => r.role.length), 8);
+  const lines = roster.roles.map((r) => `  ${r.role.padEnd(pad)}  ${r.title}${r.summary ? " — " + r.summary : ""}`);
+  return [
+    head,
+    "You talk to boss-1; it delegates to the rest.",
+    "",
+    ...lines,
+    "",
+    "Next: agent_brief(role) for a full spec · route(task) to find the fit · handoff(role, task) to delegate + log it.",
+  ].join("\n");
+}
+
+function formatBrief(b: ReturnType<typeof agentBrief>): string {
+  const header = [
+    `# ${b.role} — ${b.title}`,
+    b.summary ? `_${b.summary}_` : "",
+    `team: ${b.team} · reports to: ${b.reportsTo}${b.installed ? "" : " · ⚠ not currently installed here (venom add " + b.role + ")"}`,
+    "",
+  ].filter((l) => l !== "");
+  return header.join("\n") + "\n\n" + b.body;
+}
+
+function formatRoute(r: ReturnType<typeof routeTask>): string {
+  const L: string[] = [];
+  L.push(`Routing "${r.task}" over ${r.installedCount} installed agents.`);
+  L.push("Keyword match on each agent's spec — a shortcut, not a judgment. boss-1 is the real router.");
+  L.push("");
+  if (r.candidates.length === 0) {
+    L.push(r.terms.length === 0
+      ? "No specific keywords to match on. Hand it to boss-1 — it scopes and routes anything."
+      : "No agent's spec matched those keywords. Hand it to boss-1 — it scopes and routes anything.");
+  } else {
+    // "Closest matches", not "best-fit" — a single generic-word hit (e.g. "data") can surface a role
+    // that only coincidentally overlaps. The matched-keywords annotation below is the honest signal.
+    L.push("Closest matches (by keyword overlap — check the matched terms):");
+    r.candidates.forEach((c, i) => {
+      L.push(`  ${i + 1}. ${c.role} — ${c.title}${c.matched.length ? `   (matched: ${c.matched.join(", ")})` : ""}`);
+      if (c.summary) L.push(`     ${c.summary}`);
+      if (c.brief) L.push(`     ${c.brief}`);
+    });
+  }
+  if (r.missingTip) {
+    L.push("");
+    L.push(`Tip: your roster has no ${r.missingTip.role} (${r.missingTip.title}), which looks like the closest fit. Add it with \`venom add ${r.missingTip.role}\` if you need it.`);
+  }
+  if (r.flow.length) {
+    L.push("");
+    L.push("Suggested pass (Venom's standard flow, narrowed to your matched roles):");
+    r.flow.forEach((f, i) => L.push(`  ${i + 1}. ${f.role} — ${f.note}`));
+  }
+  L.push("");
+  L.push("Get a full spec with agent_brief(role), or delegate + log it with handoff(role, task).");
+  return L.join("\n");
+}
 
 const toolByName = new Map(TOOLS.map((t) => [t.name, t]));
 

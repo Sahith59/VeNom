@@ -496,9 +496,10 @@ function clipClause(s: string, max = 78): string {
 
 function printMcpWiring(targetDir: string): void {
   const inProject = existsSync(join(targetDir, ".venom", "install.json"));
-  console.log(bold("\n  Venom memory — opt-in MCP server\n"));
-  console.log("  Lets your agent fetch the right memory slice (or write one) with a tool call at");
-  console.log("  inference, instead of reading whole files. Tools it exposes:");
+  console.log(bold("\n  Venom — opt-in MCP server\n"));
+  console.log("  Lets your agent reach the team and its memory with a tool call at inference: fetch the");
+  console.log("  right memory slice, or ask in plain English which agent fits a task and delegate to it.");
+  console.log("  Tools it exposes:");
   for (const t of MCP_TOOLS) console.log(`    ${cyan(t.name.padEnd(16))} ${dim(clipClause(t.description))}`);
   console.log(dim("\n  The server reads/writes this project's agent-memory/. Add it to your tool once:\n"));
 
@@ -526,7 +527,7 @@ function cmdMcp(args: Args): void {
       return;
     }
     // Runs until stdin closes; must not write anything but JSON-RPC to stdout.
-    runMemoryServer({ memDir, coreDir: CORE, version: readVersion(), now: () => new Date() });
+    runMemoryServer({ memDir, coreDir: CORE, projectDir: targetDir, version: readVersion(), now: () => new Date() });
     return;
   }
   if (sub === undefined) {
@@ -621,16 +622,20 @@ function guideMemory(): string {
 
 function guideMcp(): string {
   return [
-    bold("  ▸ mcp — let the agent read/write memory at inference (optional)"),
+    bold("  ▸ mcp — let the agent reach the team + memory at inference (optional)"),
     "",
     "  The CLI viewers above are for " + bold("you") + ". The MCP server is for the " + bold("agent") + " — it exposes",
-    "  memory as tools the agent calls mid-task, so it fetches the exact slice it needs instead of",
-    "  reading whole files. It's opt-in; nothing runs unless you wire it.",
+    "  the team and its memory as tools the agent calls mid-task. It's opt-in; nothing runs unless",
+    "  you wire it.",
     "",
     "     " + cyan("venom mcp") + dim("           print the one-line wiring for Claude Code / Codex / Gemini"),
     "     " + cyan("venom mcp memory") + dim("    the server itself (your tool launches this; you rarely run it by hand)"),
     "",
-    "  Tools the agent gets: " + dim("memory_search, memory_read, memory_append, memory_stats, memory_compact."),
+    "  " + bold("Memory tools:") + dim(" memory_search, memory_read, memory_append, memory_stats, memory_compact."),
+    "  " + bold("Router tools:") + dim(" list_agents, agent_brief, route, handoff — see and reach your team in plain"),
+    dim("     English. Ask in chat \"which agent tests this?\" and ") + cyan("route") + dim(" ranks your INSTALLED roster;"),
+    "     " + cyan("handoff") + dim(" hands you the agent's brief and logs the delegation to memory. Honest keyword"),
+    dim("     matching over the specs — boss-1 is still the real router; this just narrows the field."),
     dim("  Zero-dependency, path-contained to agent-memory/, and writes are lock-serialized."),
     "",
   ].join("\n");
