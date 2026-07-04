@@ -204,7 +204,7 @@ venom add <role>          Add an optional role to an existing install
 venom tokens [--pack <id>]  Estimate token footprint + cost across models/presets
 venom models [preset]     Show or switch the model preset (quality | balanced | budget)
 venom memory <cmd>        Inspect, view & bound shared memory (stats | search | read | compact | index)
-venom mcp memory          Run the opt-in MCP memory server (agent calls tools at inference)
+venom mcp memory          Run the opt-in MCP server (memory + agent-router tools, called at inference)
 venom mcp                 Show how to wire the MCP server into Claude Code / Codex / Gemini
 venom --version           Print the version
 venom --help              Full help
@@ -245,6 +245,17 @@ and **zero-dependency** (hand-rolled JSON-RPC, no SDK). Run `venom mcp` for the 
 Claude Code, Codex, or Gemini. Path-contained to `agent-memory/` (realpath-checked, no symlink escape),
 and writes are lock-serialized so concurrent agents on one machine can't lose an append. (Sharing one
 `agent-memory/` across multiple hosts assumes unique hostnames — the usual single-machine setup is safe.)
+
+**Reach the team from chat (opt-in MCP).** The same server also exposes an *agent router*, so from
+your coding tool's chat you can see and reach the team in plain English: `list_agents` (your
+**actually installed** roster + each role's purpose — it reads the install record, so a custom
+`--roles` team routes correctly), `agent_brief(role)` (one agent's full spec, to act as it or brief a
+subagent), `route(task)` (rank the installed agents that fit a task, then lay them onto Venom's
+standard pass), and `handoff(role, task)` (hand back the agent's brief **and** log the delegation to
+`agent-memory/` so async work stays traceable). Honest scope: `route` is **keyword/field-weighted
+matching over the specs**, not a model deciding — boss-1 is still the real router; this narrows the
+field and never proposes an agent you didn't install. The MCP can't run an agent (it's a passive tool
+provider); it hands the host the right persona and the host does the work.
 
 ## Token efficiency
 
