@@ -5,14 +5,22 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync, utimesSync, readdirSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { handleMessage, TOOLS } from "../dist/mcp.js";
 import { searchMemory, readMemoryPath, appendEntry, parseLog } from "../dist/memory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(ROOT, "dist", "cli.js");
+const MEM_URL = pathToFileURL(join(ROOT, "dist", "memory.js")).href;
 const CORE = join(ROOT, "core");
 const NOW = () => new Date(2025, 5, 15, 9, 30); // fixed for deterministic timestamps
+
+// `node -e` snippet for a child process that appends one entry. Uses dynamic import() of the ESM build:
+// require() of an ESM module is unsupported on the declared engine floor (node 18.17), so require() here
+// would make these concurrency tests fail on 18.17 while passing on 20/22. Exits non-zero on failure.
+function appendChildCode(mem, entry) {
+  return `import(${JSON.stringify(MEM_URL)}).then(m=>{m.appendEntry(${JSON.stringify(mem)},${JSON.stringify(entry)},new Date());}).catch(e=>{console.error(e&&e.message||e);process.exit(1);});`;
+}
 
 function project(pack = "web-app") {
   const dir = mkdtempSync(join(tmpdir(), "venom-m4-"));
@@ -242,12 +250,11 @@ test("append is concurrency-safe: parallel appends to one team log all land (no 
   const dir = project();
   try {
     const mem = join(dir, "agent-memory");
-    const memJs = join(ROOT, "dist", "memory.js");
     const N = 8;
     await Promise.all(
       Array.from({ length: N }, (_, i) =>
         new Promise((res, rej) => {
-          const code = `const{appendEntry}=require(${JSON.stringify(memJs)});appendEntry(${JSON.stringify(mem)},{team:"dev",agent:"a${i}",title:"c${i}"},new Date());`;
+          const code = appendChildCode(mem, { team: "dev", agent: `a${i}`, title: `c${i}` });
           spawn(process.execPath, ["-e", code], { stdio: "ignore" }).on("close", (c) => (c === 0 ? res() : rej(new Error("append failed"))));
         }),
       ),
@@ -285,11 +292,10 @@ test("append lock: N writers recovering from a crashed writer's lock AT ONCE all
     const lock = `${log}.lock`;
     writeFileSync(log, "# dev team - log (append-only)\n\n---\n");
     writeFileSync(lock, `999999\n${hostname()}\ndead`); // a crashed writer's lock (pid not alive)
-    const memJs = join(ROOT, "dist", "memory.js");
     const N = 12;
     const codes = Array.from({ length: N }, (_, i) =>
       new Promise((res, rej) => {
-        const code = `const{appendEntry}=require(${JSON.stringify(memJs)});appendEntry(${JSON.stringify(mem)},{team:"dev",agent:"a${i}",title:"steal-${i}"},new Date());`;
+        const code = appendChildCode(mem, { team: "dev", agent: `a${i}`, title: `steal-${i}` });
         spawn(process.execPath, ["-e", code], { stdio: "ignore" }).on("close", (c) => (c === 0 ? res() : rej(new Error(`append ${i} failed`))));
       }),
     );
@@ -318,7 +324,7 @@ test("append lock: a LIVE holder's lock is NEVER stolen, even when aged (no stal
     writeFileSync(lock, `${process.pid}\n${hostname()}\nparent`);
     utimesSync(lock, new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
     const before = parseLog(readFileSync(log, "utf8")).entries.length;
-    const code = `const{appendEntry}=require(${JSON.stringify(join(ROOT, "dist", "memory.js"))});appendEntry(${JSON.stringify(mem)},{team:"dev",agent:"thief",title:"nope"},new Date());`;
+    const code = appendChildCode(mem, { team: "dev", agent: "thief", title: "nope" });
     child = spawn(process.execPath, ["-e", code], { stdio: "ignore" });
     await new Promise((r) => setTimeout(r, 1500));
     const stillWaiting = child.exitCode === null && child.signalCode === null;
