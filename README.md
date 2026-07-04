@@ -244,6 +244,41 @@ Claude Code, Codex, or Gemini. Path-contained to `agent-memory/` (realpath-check
 and writes are lock-serialized so concurrent agents on one machine can't lose an append. (Sharing one
 `agent-memory/` across multiple hosts assumes unique hostnames — the usual single-machine setup is safe.)
 
+## Token efficiency
+
+Venom doesn't own the model's inference, so it can't make the model spend fewer tokens *per call*. What
+it does, honestly, is three things: run the same work on **cheaper models**, keep the **per-turn context
+lean**, and **bound memory growth** so a maturing project doesn't balloon the read path. Every number
+below is **measured from source** by a rerunnable benchmark — `npm run bench` (writes
+`bench/token-savings.json`) — using a char/4 token proxy and the directional prices in
+`core/model-rates.json`. They're estimates for comparison, not a billing guarantee.
+
+Measured on the `web-app` pack (14 agents, ~58k tokens of scaffolding per goal — a "goal" is modelled as
+~14 agent turns, a 70%-of-team × 1.4-review-loop heuristic, so the absolute dollars scale with that):
+
+| Lever | What it changes | Measured |
+|---|---|---|
+| **Model preset** — `venom models budget` | Same tokens, cheaper models | **~78% lower cost** than the default preset (~$0.375 → ~$0.083 per goal); ~82% vs `quality` |
+| **Lean specs** — the M2 trim | Per-turn context the agents read | Avg spec **7.8% smaller** (2,219 → 2,046 tok), per-turn overhead ~4% — the specs were already tight, so this is modest and we don't inflate it |
+| **Memory compaction** — `venom memory compact` | Hot read-path as the project grows | Scales with age: **~55% smaller at 50 log entries, ~96% at 550** (84.7k → 3.7k tok). Near-zero on a fresh project, large on a mature one. Byte-exact: archived + kept reconstruct the original, nothing lost |
+
+So the numbers mean what they say:
+- **Cost, not inference tokens.** The preset changes *price*, not token count. `budget` drops every role a
+  tier: heads and workers to Haiku-class, **and the bosses and both review gates from Opus down to
+  Sonnet** — the 78% depends on that gate downshift, so it is *not* "cheaper with the gates untouched." If
+  you want the correctness and security gates to stay on the strongest model, use `balanced` (the default:
+  bosses + gates on Opus, workers on Sonnet). The cost saving rests on evidence that a cheaper model holds
+  up for extraction- and retrieval-style work; for code-heavy roles that's an extrapolation, so verify on
+  your own work before trusting `budget` — this is not a claim that all models are equal.
+- **Compaction bounds what's *read*; it can't force selective reading.** Venom doesn't control the
+  inference call — boss-1 (or you) runs `compact` to keep the hot log lean. The read-path reduction is
+  real and grows with project age.
+- **char/4 is a proxy, and the compaction project is synthetic.** The benchmark generates representative
+  log entries in the documented format (not a specific real project); the compaction % shifts somewhat with
+  entry size (the keep-ratio dominates, but larger entries push it higher), and a real tokenizer will
+  differ — so treat these as directional before/after comparisons, not exact figures. Run it yourself:
+  `npm run bench`. Regenerate any time — the numbers come from your checkout, not from us.
+
 ## Extend it
 
 Venom is built to be extended:
@@ -263,6 +298,7 @@ git clone <this-repo> && cd venomkit
 npm install          # dev-only deps (TypeScript); the published package has zero runtime deps
 npm test             # builds, then runs the adapter + CLI test suites
 npm run build        # compile the CLI to dist/
+npm run bench        # rerun the token benchmark -> bench/token-savings.json (the "Token efficiency" numbers)
 ```
 
 ## License
