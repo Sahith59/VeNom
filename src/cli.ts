@@ -469,8 +469,16 @@ async function main(): Promise<void> {
     console.log(readVersion());
     return;
   }
+  const hasSubcommand = args._[0] !== undefined;
   const cmd = args._[0] ?? "init";
   if (args.help || cmd === "help") {
+    console.log(HELP);
+    return;
+  }
+  // Bare `venom` (no subcommand) is a friendly interactive `init` in a real terminal. But in a
+  // non-interactive context (piped, CI, some `npx` wrappers) that would scaffold a whole team into the
+  // cwd with no confirmation — so show help instead. An explicit `venom init` (e.g. with --yes) still runs.
+  if (!hasSubcommand && !process.stdin.isTTY) {
     console.log(HELP);
     return;
   }

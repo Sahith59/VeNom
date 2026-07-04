@@ -35,6 +35,19 @@ test("cli list shows all 6 packs", () => {
   }
 });
 
+test("cli with no subcommand in a non-TTY prints help and does NOT silently scaffold", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
+  try {
+    const out = run([], { cwd: t }); // execFileSync pipes stdio, so stdin is not a TTY
+    assert.match(out, /list/, "shows help (lists commands)");
+    assert.match(out, /memory/, "shows help (lists commands)");
+    assert.equal(existsSync(join(t, "CHARTER.md")), false, "did NOT scaffold a team unprompted");
+    assert.equal(existsSync(join(t, "agent-memory")), false, "no agent-memory written unprompted");
+  } finally {
+    rmSync(t, { recursive: true, force: true });
+  }
+});
+
 test("cli init (non-interactive) installs a working team and fills the charter", () => {
   const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
   try {
