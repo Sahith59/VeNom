@@ -211,6 +211,7 @@ venom --help              Full help
 
 init options:
   --pack <id>             web-app | data-ml | research-academic | writing-content | security-audit | solo-minimal
+  --roles <a,b,c>         Custom roster — pick specialists; the core gates are always installed
   --name <name>           Project name (default: folder name)
   --one-liner <text>      One-line description of the project
   --non-negotiables <t>   Rules that must never be broken (separate with ';')

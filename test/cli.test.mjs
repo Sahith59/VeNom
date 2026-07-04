@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,54 @@ test("cli list shows all 6 packs", () => {
   const out = run(["list"]);
   for (const id of ["web-app", "data-ml", "research-academic", "writing-content", "security-audit", "solo-minimal"]) {
     assert.match(out, new RegExp(id), `list mentions ${id}`);
+  }
+});
+
+test("cli init --roles installs a custom roster (core gates + your picks), rejecting bad input", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-roster-"));
+  try {
+    run(["init", "--dir", t, "--tool", "claude-code", "--roles", "developer-1,testing", "--name", "R", "--yes"]);
+    const agents = readdirSync(join(t, ".claude", "agents")).map((f) => f.replace(/\.md$/, "")).sort();
+    assert.deepEqual(agents, ["boss-1", "boss-2", "critics", "developer-1", "security", "testing"], "core gates + exactly the two picks");
+
+    // an unknown role is rejected with no partial scaffold
+    const bad = mkdtempSync(join(tmpdir(), "venom-roster2-"));
+    let threw = false, stderr = "";
+    try {
+      run(["init", "--dir", bad, "--tool", "claude-code", "--roles", "developer-1,bogusrole", "--name", "R", "--yes"]);
+    } catch (e) {
+      threw = true;
+      stderr = String(e.stderr || e.message);
+    }
+    assert.ok(threw, "unknown role exits non-zero");
+    assert.match(stderr, /Unknown role/, "and names the bad role");
+    assert.equal(existsSync(join(bad, "CHARTER.md")), false, "no partial scaffold on a bad roster");
+    rmSync(bad, { recursive: true, force: true });
+
+    // a bare/empty --roles is a mistake, not "install nothing"
+    assert.throws(() => run(["init", "--dir", mkdtempSync(join(tmpdir(), "venom-r3-")), "--roles=", "--tool", "claude-code", "--yes"]), /needs a comma|Command failed/);
+  } finally {
+    rmSync(t, { recursive: true, force: true });
+  }
+});
+
+test("cli add on a custom --roles install preserves the roster AND the model preset (no pack re-inflation)", () => {
+  const t = mkdtempSync(join(tmpdir(), "venom-addroster-"));
+  try {
+    // default pack (web-app) so removeRoles is non-empty — the exact condition that exposed the bug
+    run(["init", "--dir", t, "--tool", "claude-code", "--roles", "developer-1", "--models", "budget", "--name", "R", "--yes"]);
+    run(["add", "design", "--dir", t]);
+
+    const agents = readdirSync(join(t, ".claude", "agents")).map((f) => f.replace(/\.md$/, "")).sort();
+    assert.deepEqual(agents, ["boss-1", "boss-2", "critics", "design", "developer-1", "security"], "add keeps the custom roster; the pack did NOT re-inflate");
+
+    const rec = JSON.parse(readFileSync(join(t, ".venom", "install.json"), "utf8"));
+    assert.ok(Array.isArray(rec.removeRoles) && rec.removeRoles.length > 0, "removeRoles is preserved, not blanked");
+    assert.ok(!rec.removeRoles.includes("design"), "the just-added role is un-removed");
+    assert.equal(rec.preset, "budget", "the chosen model preset survives an add");
+    assert.match(readFileSync(join(t, ".claude", "agents", "developer-1.md"), "utf8"), /^model:\s*haiku/m, "developer-1 stays on the budget-tier model");
+  } finally {
+    rmSync(t, { recursive: true, force: true });
   }
 });
 

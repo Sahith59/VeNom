@@ -83,6 +83,7 @@ ${bold("Usage")}
 
 ${bold("init options")}
   --pack <id>               web-app | data-ml | research-academic | writing-content | security-audit | solo-minimal
+  --roles <a,b,c>           Custom roster: pick specialists (the core gates are always installed)
   --name <name>             Project name (default: the folder name)
   --one-liner <text>        One-line description of the project
   --non-negotiables <text>  Rules that must never be broken (separate with ';')
@@ -120,6 +121,14 @@ async function cmdInit(args: Args): Promise<void> {
   let oneLiner = typeof args["one-liner"] === "string" ? (args["one-liner"] as string) : "";
   let nonNegotiables = typeof args["non-negotiables"] === "string" ? (args["non-negotiables"] as string) : "";
   let outOfLane = typeof args["out-of-lane"] === "string" ? (args["out-of-lane"] as string) : "";
+  // Custom roster: --roles picks the specialists (the core gates are always installed). A bare/empty
+  // --roles is a mistake, not "install nothing" — reject it rather than silently ignoring.
+  if (args.roles === true || args.roles === "") {
+    console.error(red("--roles needs a comma-separated list, e.g. `--roles developer-1,testing,technical-writer`. Run `venom list` to see the roles."));
+    process.exitCode = 1;
+    return;
+  }
+  let rolesInput = typeof args.roles === "string" ? args.roles : "";
 
   console.log(bold("\n  Venom — let's set up your agent team.\n"));
 
@@ -140,6 +149,14 @@ async function cmdInit(args: Args): Promise<void> {
       })),
       Math.max(0, packIds.indexOf(pack)),
     );
+    if (!rolesInput) {
+      const specialists = Object.keys(packs.roles).filter((r) => !packs.core.includes(r));
+      console.log(dim(`\n  ${packs.packs[pack].name} installs: ${[...packs.core, ...packs.packs[pack].adds].join(", ")}`));
+      console.log(dim(`  Core gates (always on): ${packs.core.join(", ")}`));
+      console.log(dim(`  Pick your own specialists from: ${specialists.join(", ")}`));
+      const custom = await text("Customize the roster? comma-separated specialists (or blank to use the pack)", "");
+      if (custom.trim()) rolesInput = custom;
+    }
     projectName = await text("Project name", projectName);
     oneLiner = await text("One-line description (what is this project?)", oneLiner);
     nonNegotiables = await text("Non-negotiables — rules that must never be broken (separate with ';')", nonNegotiables);
@@ -193,6 +210,39 @@ async function cmdInit(args: Args): Promise<void> {
     return;
   }
 
+  // Resolve the roster. Default: carry forward prior add/remove (venom add). If --roles (or the
+  // interactive prompt) was given, it REDEFINES the specialists on top of the always-on core gates —
+  // expressed as extra/remove relative to the pack so the adapter's (core + adds + extra − remove) math
+  // lands on exactly what the owner asked for.
+  let extraRoles = priorExtraRoles;
+  let removeRoles = priorRemoveRoles;
+  const rosterGiven = rolesInput !== ""; // a value was passed (flag or interactive) — even if it's junk
+  if (rosterGiven) {
+    const requested = rolesInput.split(",").map((s) => s.trim()).filter(Boolean);
+    const specialists = Object.keys(packs.roles).filter((r) => !packs.core.includes(r));
+    const unknown = requested.filter((r) => !packs.roles[r]);
+    if (unknown.length) {
+      console.error(red(`Unknown role(s): ${unknown.join(", ")}.`));
+      console.error(dim(`  Pick from: ${specialists.join(", ")}`));
+      console.error(dim(`  (the core gates ${packs.core.join(", ")} are always included).`));
+      process.exitCode = 1;
+      return;
+    }
+    const desired = [...new Set(requested.filter((r) => !packs.core.includes(r)))]; // core is always on
+    if (desired.length === 0) {
+      // No specialists (empty, only-commas, or only core roles) — a gate-only team isn't useful, and this
+      // is almost always a mistake. Reject consistently (bare/empty --roles is already rejected above).
+      console.error(red(`--roles must name at least one specialist. The core gates (${packs.core.join(", ")}) are always installed.`));
+      console.error(dim(`  Specialists: ${specialists.join(", ")}`));
+      process.exitCode = 1;
+      return;
+    }
+    const packAdds: string[] = packs.packs[pack].adds;
+    extraRoles = desired.filter((r) => !packAdds.includes(r));
+    removeRoles = packAdds.filter((r) => !desired.includes(r));
+    console.log(dim(`  Custom roster: ${[...packs.core, ...desired].join(", ")}  (${packs.core.length + desired.length} agents)`));
+  }
+
   // Resolve the model preset (flag > carried-forward > default).
   const modelsCfg = loadModels(CORE);
   const presetName = typeof args.models === "string" ? args.models : priorPreset || modelsCfg.defaultPreset;
@@ -217,13 +267,14 @@ async function cmdInit(args: Args): Promise<void> {
     projectName,
     version: readVersion(),
     force: Boolean(args.force),
-    extraRoles: priorExtraRoles,
-    removeRoles: priorRemoveRoles,
+    extraRoles,
+    removeRoles,
     modelByRole: plan.modelByRole,
     preset: plan.preset,
   });
 
-  console.log(green(`\n  ✓ Installed the ${bold(packs.packs[pack].name)} team — ${res.agentsWritten} agents for ${adapterInfo.name}.\n`));
+  const teamLabel = rosterGiven ? "custom roster" : `${packs.packs[pack].name} team`;
+  console.log(green(`\n  ✓ Installed the ${bold(teamLabel)} — ${res.agentsWritten} agents for ${adapterInfo.name}.\n`));
   const layout: Array<{ label: string; path: string; note?: string }> = Array.isArray(res.layout) ? res.layout : [];
   for (const item of layout) {
     const note = item.note ? dim(`  ${item.note}`) : "";
@@ -527,7 +578,8 @@ function guideStart(): string {
     "  1. Install a team " + dim("(inside your project folder — safe on an existing repo):"),
     "       " + cyan("npx venomkit init") + dim("                         interactive"),
     "       " + cyan("npx venomkit init --pack solo-minimal --yes") + dim("  scripted"),
-    dim("     Pick a pack with `venom list` (solo-minimal = lightest; web-app = the full org)."),
+    dim("     Pick a pack with `venom list` (solo-minimal = lightest; web-app = the full org),"),
+    dim("     or build a custom roster: ") + cyan("--roles developer-1,testing") + dim(" (core gates always on)."),
     "",
     "  2. Sharpen " + cyan("CHARTER.md") + " — the single source of truth every agent reads before acting.",
     dim("     Fill in the real scope and the non-negotiables (the rules that must never be broken)."),
@@ -666,8 +718,16 @@ async function cmdAdd(args: Args): Promise<void> {
   const rec = JSON.parse(readFileSync(recPath, "utf8"));
   const charterPath = join(targetDir, "CHARTER.md");
   const charterContent = existsSync(charterPath) ? readFileSync(charterPath, "utf8") : "";
-  const adapter = await loadAdapter(PKG_ROOT, rec.tool ?? "claude-code");
+  const tool = rec.tool ?? "claude-code";
+  const adapter = await loadAdapter(PKG_ROOT, tool);
   const extraRoles = Array.from(new Set([...(rec.extraRoles ?? []), role]));
+  // Preserve the custom roster: a `--roles` install persists removeRoles; if we dropped it the adapter
+  // would re-inflate the whole pack. Un-remove the role we're adding (it may have been a removed pack add).
+  const removeRoles = (Array.isArray(rec.removeRoles) ? rec.removeRoles : []).filter((r: string) => r !== role);
+  // Preserve the model preset the owner chose — otherwise every agent re-renders at the default model.
+  const modelsCfg = loadModels(CORE);
+  const presetName = typeof rec.preset === "string" && modelsCfg.presets[rec.preset] ? rec.preset : modelsCfg.defaultPreset;
+  const plan = resolvePreset(CORE, Object.keys(packs.roles), tool, presetName);
   const res = adapter.install({
     coreDir: CORE,
     targetDir,
@@ -675,6 +735,9 @@ async function cmdAdd(args: Args): Promise<void> {
     charterContent,
     version: readVersion(),
     extraRoles,
+    removeRoles,
+    modelByRole: plan.modelByRole,
+    preset: plan.preset,
   });
   if (res.roles.includes(role)) {
     console.log(green(`  ✓ Added ${bold(role)}. Team now has ${res.agentsWritten} agents.`));
