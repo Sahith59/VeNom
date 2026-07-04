@@ -40,32 +40,40 @@ export interface LogParse {
   entries: string[];
 }
 
-// Regions where a `### [...]` line must NOT be read as an entry header:
-//   - line-anchored HTML comment blocks (the template's example entry lives in one), and
-//   - fenced code blocks (an agent may paste an example header inside ``` fences).
-// Anchoring `<!--`/``` to the start of a line stops a stray token mid-prose from spuriously pairing
-// with a later closer and swallowing real entries in between.
-function protectedRanges(s: string): Array<[number, number]> {
+// Line-anchored HTML comment blocks (the template's delete-me example entry lives in one). Anchoring
+// `<!--` to the start of a line keeps a stray `<!--` mid-prose from pairing with a later `-->`.
+function commentRanges(s: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
-  const patterns = [/^[ \t]*<!--[\s\S]*?-->/gm, /^[ \t]*```[\s\S]*?^[ \t]*```[^\n]*$/gm];
-  for (const re of patterns) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(s)) !== null) ranges.push([m.index, m.index + m[0].length]);
-  }
+  const re = /^[ \t]*<!--[\s\S]*?-->/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) ranges.push([m.index, m.index + m[0].length]);
   return ranges;
 }
 
+// A real entry header starts a new top-level block, so it is preceded by a blank line (or is the very
+// start of the file). A header QUOTED inside another entry's body follows prose on the previous line,
+// not a blank line — which is exactly how we avoid tearing a cited `### [..]` out of its entry.
+function precededByBlankLine(content: string, p: number): boolean {
+  if (p === 0) return true;
+  if (content[p - 1] !== "\n") return false;
+  let j = p - 2;
+  while (j >= 0 && content[j] !== "\n") j--;
+  return content.slice(j + 1, p - 1).trim() === "";
+}
+
 export function parseLog(content: string): LogParse {
-  const ranges = protectedRanges(content);
-  const isProtected = (pos: number): boolean => ranges.some(([a, b]) => pos >= a && pos < b);
-  // Entry headers follow the documented format `### [YYYY-MM-DD HH:MM] <agent> — <title>`.
-  // Requiring the real timestamp (not merely a leading `### [`) keeps a quoted or placeholder header
-  // inside an entry body from being mistaken for a new entry and torn across the compaction boundary.
-  const re = /^### \[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}\]/gm;
+  const comments = commentRanges(content);
+  const inComment = (pos: number): boolean => comments.some(([a, b]) => pos >= a && pos < b);
+  // A real entry is the documented header `### [YYYY-MM-DD H:MM[:SS]] <agent> — <title>` at column 0,
+  // starting a new block (preceded by a blank line) and not inside an HTML comment. The timestamp is
+  // tolerant of a single-digit hour and optional seconds (agents write both). A `### [..]` line that
+  // is NOT a blank-line-separated block — e.g. a header quoted inside a body — is left glued to its
+  // entry: never split, never torn, never lost (at worst that entry is not independently compacted).
+  const re = /^### \[\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(?::\d{2})?\]/gm;
   const heads: number[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
-    if (!isProtected(m.index)) heads.push(m.index);
+    if (precededByBlankLine(content, m.index) && !inComment(m.index)) heads.push(m.index);
   }
   if (heads.length === 0) return { preamble: content, entries: [] };
   const preamble = content.slice(0, heads[0]);

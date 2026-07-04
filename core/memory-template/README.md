@@ -73,7 +73,9 @@ Never read a whole `log.md`; scan its `###` headers and read only the entries re
 ## The log entry format (so everyone can read only their slice)
 
 Every entry in a `log.md` uses this shape. The `###` header line is what lets other agents scan and
-skip — keep it present and descriptive.
+skip — keep it present and descriptive, and **put a blank line before each entry** (every entry is a
+top-level block). `venom memory` finds entry boundaries by that blank-line-separated `### [timestamp]`
+header, so a header you *quote* inside a body (not blank-separated) is safely left part of its entry.
 
 ```
 ### [YYYY-MM-DD HH:MM] <AGENT-NAME> — <short title of the action>

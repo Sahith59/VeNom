@@ -30,6 +30,13 @@ function parseArgs(argv: string[]): Args {
       args._.push(a);
       continue;
     }
+    // Support the `--key=value` form so it can't be silently swallowed into the default.
+    const eq = key.indexOf("=");
+    if (eq !== -1) {
+      const k = key.slice(0, eq);
+      args[short[k] ?? k] = key.slice(eq + 1);
+      continue;
+    }
     const next = argv[i + 1];
     const isBoolFlag = ["yes", "help", "version", "force", "write"].includes(key);
     if (isBoolFlag || next === undefined || next.startsWith("-")) {

@@ -49,27 +49,53 @@ test("parseLog: no entries -> whole content is preamble", () => {
   assert.equal(p.preamble, "# just a header\n\nno entries here\n");
 });
 
-test("parseLog: no entry TEARING — placeholder/fenced/mid-body headers are not entries", () => {
-  // a placeholder header quoted in a body must not become a 4th entry
+test("parseLog: quoting a REAL header at column 0 in a body does not tear the entry (Finding 1)", () => {
+  // The memory protocol tells agents to cite entries they build on — so a real `### [..]` header can
+  // legitimately appear inside another entry's body. It must NOT become its own entry.
+  const c =
+    "# log\n\n---\n\n" +
+    "### [2025-03-01 10:00] boss-1 — retro on the outage\n" +
+    "- **Did:** reconstructed the timeline. The triggering entry was:\n" +
+    "### [2025-02-15 03:00] oncall — db failover started\n" +
+    "- **Result:** root-caused; owner notified.\n";
+  const p = parseLog(c);
+  assert.equal(p.entries.length, 1, "one logical entry — the cited header is body, not a new entry");
+  assert.equal(p.preamble + p.entries.join(""), c, "byte-exact");
+  assert.equal(planCompact(c, { keep: 1 }).movedCount, 0, "single entry: nothing torn into the archive");
+});
+
+test("parseLog: recognizes seconds and single-digit-hour timestamps agents write (Finding 2)", () => {
+  const c =
+    "# log\n\n" +
+    "### [2025-02-01 09:00:07] dev — one\n- **Did:** a.\n\n" +
+    "### [2025-02-02 9:30] dev — two\n- **Did:** b.\n\n" +
+    "### [2025-02-03 09:00:15] dev — three\n- **Did:** c.\n";
+  assert.equal(parseLog(c).entries.length, 3, "seconds and single-digit hours are still entries");
+});
+
+test("parseLog: placeholder / fenced / mid-body headers are not entries; entries around fences are found", () => {
+  // placeholder header quoted in a body (blank-separated 3rd entry) — the placeholder is not a 4th entry
   const withPlaceholder =
     mkLog(2, "# log\n\n") +
-    "### [2025-02-03 09:00] developer-1 — real\n- **Did:** quotes `### [YYYY-MM-DD HH:MM] agent — title`.\n";
-  assert.equal(parseLog(withPlaceholder).entries.length, 3, "placeholder in a body is not an entry");
+    "\n### [2025-02-03 09:00] developer-1 — real\n- **Did:** quotes `### [YYYY-MM-DD HH:MM] agent — title`.\n";
+  assert.equal(parseLog(withPlaceholder).entries.length, 3, "placeholder is not an entry");
 
-  // a real-looking header inside a ``` fence must not split the entry
+  // a header inside a ``` fence (not blank-separated) must not split its entry
   const fenced =
-    "# log\n\n" +
-    "### [2025-02-01 09:00] dev — one\n- **Did:** example:\n```\n### [2025-02-02 09:00] dev — in fence\n```\n- **Result:** ok.\n";
-  const pf = parseLog(fenced);
-  assert.equal(pf.entries.length, 1, "fenced header must not tear the entry");
-  assert.equal(pf.preamble + pf.entries.join(""), fenced, "still byte-exact");
+    "# log\n\n### [2025-02-01 09:00] dev — one\n- **Did:** example:\n```\n### [2025-02-02 09:00] dev — in fence\n```\n- **Result:** ok.\n";
+  assert.equal(parseLog(fenced).entries.length, 1, "fenced header does not tear the entry");
+
+  // but two real, blank-separated entries around a fenced block are both found (Finding 4)
+  const two =
+    "# log\n\n### [2025-01-01 09:00] dev — one\n- **Did:** see:\n```\ncode\n```\n\n### [2025-01-02 09:00] dev — two\n- **Did:** real.\n";
+  assert.equal(parseLog(two).entries.length, 2, "fenced code in entry one doesn't hide entry two");
 });
 
 test("parseLog: a stray `<!--` mid-body does not swallow later entries", () => {
   const content =
     "# log\n\n" +
-    "### [2025-02-01 09:00] dev — a\n- **Did:** wrote a <!-- token inline.\n" +
-    "### [2025-02-02 09:00] dev — b\n- **Did:** normal.\n" +
+    "### [2025-02-01 09:00] dev — a\n- **Did:** wrote a <!-- token inline.\n\n" +
+    "### [2025-02-02 09:00] dev — b\n- **Did:** normal.\n\n" +
     "### [2025-02-03 09:00] dev — c\n- **Result:** closes --> here.\n";
   assert.equal(parseLog(content).entries.length, 3, "line-anchored comments only; no entry swallowed");
 });
@@ -173,9 +199,9 @@ test("cli e2e: a second batch of entries archives in chronological order (never 
     const firstArch = parseLog(readFileSync(archivePath, "utf8")).entries;
     assert.equal(firstArch.length, 5);
 
-    // append 10 more real entries (tasks 16..25) to the live log, then compact again
+    // append 10 more real entries (tasks 16..25), blank-line-separated as the format requires
     const more = parseLog(mkLog(25)).entries.slice(15).join("");
-    writeFileSync(logPath, readFileSync(logPath, "utf8") + more);
+    writeFileSync(logPath, readFileSync(logPath, "utf8").replace(/\n*$/, "\n\n") + more);
     run(["memory", "compact", "--dir", dir, "--keep", "10", "--write"]);
 
     // first pass archived tasks 1-5; second pass keeps newest 10 (16-25) and archives 6-15.
@@ -222,6 +248,19 @@ test("cli e2e: index refuses to write (preserving content) when markers are malf
     const after = readFileSync(idxPath, "utf8");
     assert.match(after, /Hand-written IMPORTANT map/, "human content NOT deleted");
     assert.match(after, /keep me/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli: --keep=N and --dir=PATH (equals form) are honored, not silently defaulted (Finding 3)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "venom-m3eq-"));
+  try {
+    run(["init", "--dir", dir, "--tool", "claude-code", "--pack", "solo-minimal", "--name", "Eq", "--yes"]);
+    writeFileSync(join(dir, "agent-memory", "dev", "log.md"), mkLog(30));
+    const out = run(["memory", "compact", `--dir=${dir}`, "--keep=5"]);
+    assert.match(out, /newest 5 entries/, "equals-form --keep=5 honored (not defaulted to 20)");
+    assert.match(out, /dev\/log\.md/, "equals-form --dir targeted the right project");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
