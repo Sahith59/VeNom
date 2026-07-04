@@ -197,12 +197,13 @@ add-on (`venom add marketing`).
 ## CLI reference
 
 ```
+venom guide [topic]       New here? A plain-English walkthrough (start|memory|mcp|cli|cost)
 venom init [options]      Install a team into the current project
 venom list                Show the available packs and roles
 venom add <role>          Add an optional role to an existing install
 venom tokens [--pack <id>]  Estimate token footprint + cost across models/presets
 venom models [preset]     Show or switch the model preset (quality | balanced | budget)
-venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
+venom memory <cmd>        Inspect, view & bound shared memory (stats | search | read | compact | index)
 venom mcp memory          Run the opt-in MCP memory server (agent calls tools at inference)
 venom mcp                 Show how to wire the MCP server into Claude Code / Codex / Gemini
 venom --version           Print the version

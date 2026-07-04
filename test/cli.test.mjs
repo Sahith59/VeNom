@@ -35,6 +35,27 @@ test("cli list shows all 6 packs", () => {
   }
 });
 
+test("cli guide walks a new user through everything; a topic narrows it; a bad topic errors", () => {
+  const full = run(["guide"]);
+  assert.match(full, /BOSS-1/, "overview explains the orchestrator");
+  for (const t of ["start", "memory", "mcp", "cli", "cost"]) assert.match(full, new RegExp(t), `full guide covers ${t}`);
+  assert.match(full, /agent-memory\//, "guide shows the memory location");
+
+  const mem = run(["guide", "memory"]);
+  assert.match(mem, /SNAPSHOT\.md/, "the memory topic describes the layout");
+  assert.match(mem, /log\.archive\.md/, "layout names the archive");
+  assert.match(mem, /venom memory search/, "points to the CLI viewer");
+  assert.ok(!/from zero to your first goal/.test(mem), "a topic prints only its own section");
+
+  // Honesty guard: the budget cost claim must never regress to "gates stay on the strong model"
+  // (the exact defect a prior audit caught). budget downshifts the gates Opus->Sonnet.
+  const cost = run(["guide", "cost"]);
+  assert.match(cost, /Opus to Sonnet/, "guide states budget drops the gates Opus->Sonnet");
+  assert.ok(!/gates? (stay|remain|kept?) on the (strong|top)|gates untouched/i.test(cost), "no false 'gates stay strong' claim");
+
+  assert.throws(() => run(["guide", "bogustopic"]), /Unknown guide topic|exited/, "a bad topic is rejected");
+});
+
 test("cli with no subcommand in a non-TTY prints help and does NOT silently scaffold", () => {
   const t = mkdtempSync(join(tmpdir(), "venom-cli-"));
   try {

@@ -7,7 +7,7 @@ import { fillCharter } from "./charter.js";
 import { loadAdapter, detectTool, ADAPTERS } from "./tool.js";
 import { renderTokens } from "./tokens.js";
 import { loadModels, resolvePreset, presetNames } from "./models.js";
-import { loadBudgets, renderStats, renderCompact, renderIndex } from "./memory.js";
+import { loadBudgets, renderStats, renderCompact, renderIndex, searchMemory, readMemoryPath } from "./memory.js";
 import { runMemoryServer, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { bold, dim, cyan, green, yellow, red } from "./style.js";
 
@@ -66,13 +66,16 @@ function loadPacks(): any {
 const HELP = `
 ${bold("Venom")} — scaffold a team of role-based AI agents into your project.
 
+${bold("New here?")}  ${cyan("venom guide")}  — a plain-English walkthrough of the whole thing.
+
 ${bold("Usage")}
+  venom guide [topic]       Walkthrough for new users (topic: start|memory|mcp|cli|cost)
   venom init [options]      Install a team into the current project
-  venom list                Show the available packs and roles
+  venom list                Show the packs (sizes + the core roles) and add-ons
   venom add <role>          Add an optional role to an existing install
   venom tokens [--pack <id>]  Estimate the token footprint + cost across models
   venom models [preset]     Show or switch the model preset (quality/balanced/budget)
-  venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
+  venom memory <cmd>        Inspect, view & bound shared memory (stats|search|read|compact|index)
   venom mcp memory          Run the opt-in MCP memory server (agent calls tools at inference)
   venom mcp                 Show how to wire the MCP server into Claude Code / Codex / Gemini
   venom --version           Print the version
@@ -92,6 +95,8 @@ ${bold("init options")}
 
 ${bold("memory commands")} ${dim("(operate on ./agent-memory, or pass --dir <project>)")}
   venom memory stats        Show the memory footprint — hot read-path vs. cold archives
+  venom memory search <q>   Find matching entries (ranked); --limit <n>, --all (incl. archives)
+  venom memory read <ref>   Print a file or a single entry, e.g. dev/log.md or dev/log.md#3
   venom memory compact      Archive old team-log entries (dry run; add --write to apply)
   venom memory index        Regenerate INDEX.md's entry catalog (preview; --write to save)
   --keep <n>                compact: entries to keep hot per log (default 20)
@@ -231,6 +236,7 @@ async function cmdInit(args: Args): Promise<void> {
   for (const w of res.warnings) console.log(yellow(`  ! ${w}`));
 
   console.log(bold("\n  Next:"));
+  console.log(`  ${dim("New to Venom?")}  Run ${cyan("venom guide")} ${dim("for a plain-English walkthrough of everything below.")}`);
   console.log(`  1. Review ${cyan("CHARTER.md")} — sharpen the non-negotiables and scope. It drives every decision.`);
   console.log(`  2. Read ${cyan(".venom/workflow.md")} — how to drive your team (the leash, the gates, the loops).`);
   const startHint = adapter.meta.startHint ?? `Open this project in ${adapterInfo.name} and give BOSS-1 your first goal.`;
@@ -365,8 +371,66 @@ function cmdMemory(args: Args): void {
     console.log(renderIndex(memDir, write));
     return;
   }
-  console.error(red(`Unknown memory subcommand "${sub}". Use: stats | compact | index.`));
+  if (sub === "search") {
+    const query = args._.slice(2).join(" ").trim();
+    if (!query) {
+      console.error(red("Usage: venom memory search <query> [--limit <n>] [--all]"));
+      process.exitCode = 1;
+      return;
+    }
+    // A bare/dashed `--limit` parses to boolean true; `--limit=` parses to "". Reject both rather than
+    // silently falling back to the default — the same guard compact's --keep already enforces.
+    if (args.limit === true || args.limit === "") {
+      console.error(red("--limit needs a numeric value, e.g. `--limit 5`."));
+      process.exitCode = 1;
+      return;
+    }
+    const limit = typeof args.limit === "string" ? Number(args.limit) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      console.error(red("--limit must be a positive integer."));
+      process.exitCode = 1;
+      return;
+    }
+    const hits = searchMemory(memDir, query, { limit, includeArchived: Boolean(args.all || args.archived) });
+    console.log(renderSearch(query, hits));
+    return;
+  }
+  if (sub === "read") {
+    const path = typeof args._[2] === "string" ? args._[2] : "";
+    if (!path.trim()) {
+      console.error(red("Usage: venom memory read <path>   e.g. `venom memory read SNAPSHOT.md` or `venom memory read dev/log.md#3`"));
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const r = readMemoryPath(memDir, path);
+      console.log(`\n${bold("  " + r.ref)}\n\n${r.text}\n`);
+    } catch (err) {
+      console.error(red(`venom: ${err instanceof Error ? err.message : String(err)}`));
+      process.exitCode = 1;
+    }
+    return;
+  }
+  console.error(red(`Unknown memory subcommand "${sub}". Use: stats | search | read | compact | index.`));
   process.exitCode = 1;
+}
+
+function renderSearch(query: string, hits: ReturnType<typeof searchMemory>): string {
+  const L: string[] = [""];
+  if (hits.length === 0) {
+    L.push(dim(`  No memory matched "${query}". Try broader keywords, or add --all to include cold archives.`));
+    L.push("");
+    return L.join("\n");
+  }
+  L.push(bold(`  ${hits.length} result${hits.length === 1 ? "" : "s"} for "${query}"`) + dim("  — most relevant first"));
+  L.push(dim("  Read a full entry with:  ") + cyan("venom memory read <ref>"));
+  L.push("");
+  hits.forEach((h, i) => {
+    L.push(`  ${dim((i + 1 + ".").padStart(3))} ${cyan(h.ref)}  ${dim("[" + h.field + "]")}`);
+    L.push(`      ${h.snippet}`);
+  });
+  L.push("");
+  return L.join("\n");
 }
 
 // Clip a tool description to a short one-liner at a word boundary — never mid-abbreviation (the old
@@ -420,6 +484,163 @@ function cmdMcp(args: Args): void {
   }
   console.error(red(`Unknown mcp subcommand "${sub}". Use: venom mcp memory  (run the server)  ·  venom mcp  (wiring help).`));
   process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// guide — a friendly, in-terminal walkthrough for someone brand new to Venom.
+// ---------------------------------------------------------------------------
+
+const GUIDE_TOPICS = ["start", "memory", "mcp", "cli", "cost"] as const;
+type GuideTopic = (typeof GUIDE_TOPICS)[number];
+
+function guideOverview(): string {
+  return [
+    "",
+    bold("  Venom — how it works, in 60 seconds"),
+    "",
+    "  Venom drops a team of role-based AI agents into your project. You talk to " + bold("BOSS-1") + ", the",
+    "  orchestrator. It breaks your goal into tasks, hands each to the right specialist, runs a review",
+    "  loop, and records everything to a shared on-disk memory — so the team stays coordinated and",
+    "  remembers across sessions.",
+    "",
+    "  " + bold("The loop:") + "  you give BOSS-1 a goal  →  it delegates to specialists  →  " + dim("critics + security"),
+    "  " + dim("gates review and can BLOCK")  + "  →  the work and the decisions land in agent-memory/.",
+    "",
+    "  " + bold("Four steps to start:"),
+    "    1. " + cyan("venom init") + dim("          install a team into your project"),
+    "    2. edit " + cyan("CHARTER.md") + dim("      the scope + rules every agent reads first"),
+    "    3. open the project in your coding tool and give BOSS-1 a goal in plain English",
+    "    4. " + cyan("venom memory stats") + dim("  keep the shared memory lean as the project grows"),
+    "",
+    "  " + bold("Read more:") + "  " + cyan("venom guide " + GUIDE_TOPICS.join(" | ")),
+    "",
+  ].join("\n");
+}
+
+function guideStart(): string {
+  return [
+    bold("  ▸ start — from zero to your first goal"),
+    "",
+    dim("  (Commands below are written as `venom …`. Without a global install, prefix them with"),
+    dim("   `npx venomkit` — e.g. `npx venomkit memory stats`.)"),
+    "",
+    "  1. Install a team " + dim("(inside your project folder — safe on an existing repo):"),
+    "       " + cyan("npx venomkit init") + dim("                         interactive"),
+    "       " + cyan("npx venomkit init --pack solo-minimal --yes") + dim("  scripted"),
+    dim("     Pick a pack with `venom list` (solo-minimal = lightest; web-app = the full org)."),
+    "",
+    "  2. Sharpen " + cyan("CHARTER.md") + " — the single source of truth every agent reads before acting.",
+    dim("     Fill in the real scope and the non-negotiables (the rules that must never be broken)."),
+    "",
+    "  3. Drive the team. Open the project in Claude Code / Codex / Gemini — your lead session IS",
+    "     BOSS-1. Just give it a goal:",
+    green("       \"Add JWT auth — signup, login, protected routes. Tests required.\""),
+    dim("     BOSS-1 plans it, delegates to the specialists, runs the gates, and logs every step."),
+    dim("     Read .venom/workflow.md once — it explains the leash, the gates, and the loops."),
+    "",
+  ].join("\n");
+}
+
+function guideMemory(): string {
+  return [
+    bold("  ▸ memory — the shared brain (agent-memory/)"),
+    "",
+    "  Everything the team knows lives in " + cyan("agent-memory/") + ". Layout:",
+    dim("     SNAPSHOT.md          where the project is right now (read first, kept small)"),
+    dim("     INDEX.md             a scannable catalog of every log entry"),
+    dim("     <team>/log.md        append-only record of every action (dev/research/review/security)"),
+    dim("     <team>/log.archive.md old entries moved here by compaction (never deleted)"),
+    dim("     lessons/<team>.md    rules learned from mistakes (compounds over time)"),
+    dim("     adr/<team>/          load-bearing decisions (immutable)"),
+    dim("     decisions/needed.md  the escalation queue"),
+    "",
+    "  " + bold("View it from the CLI") + dim("  (no MCP needed):"),
+    "     " + cyan("venom memory stats") + dim("            where the tokens are — hot read-path vs. cold archives"),
+    "     " + cyan("venom memory search <query>") + dim("   find the entries that match (ranked)"),
+    "     " + cyan("venom memory read <ref>") + dim("       print a file or a single entry, e.g. dev/log.md#3"),
+    "     " + cyan("venom memory index") + dim("            regenerate INDEX.md's catalog"),
+    "",
+    "  " + bold("Keep it lean as it grows:"),
+    "     " + cyan("venom memory compact --write") + dim("   archive old log entries (verbatim; nothing is lost)"),
+    dim("     Hot path (SNAPSHOT + a log slice) stays small so agents read little each turn."),
+    "",
+  ].join("\n");
+}
+
+function guideMcp(): string {
+  return [
+    bold("  ▸ mcp — let the agent read/write memory at inference (optional)"),
+    "",
+    "  The CLI viewers above are for " + bold("you") + ". The MCP server is for the " + bold("agent") + " — it exposes",
+    "  memory as tools the agent calls mid-task, so it fetches the exact slice it needs instead of",
+    "  reading whole files. It's opt-in; nothing runs unless you wire it.",
+    "",
+    "     " + cyan("venom mcp") + dim("           print the one-line wiring for Claude Code / Codex / Gemini"),
+    "     " + cyan("venom mcp memory") + dim("    the server itself (your tool launches this; you rarely run it by hand)"),
+    "",
+    "  Tools the agent gets: " + dim("memory_search, memory_read, memory_append, memory_stats, memory_compact."),
+    dim("  Zero-dependency, path-contained to agent-memory/, and writes are lock-serialized."),
+    "",
+  ].join("\n");
+}
+
+function guideCli(): string {
+  return [
+    bold("  ▸ cli — the full command map"),
+    "",
+    "     " + cyan("venom init") + dim("               install a team into the current project"),
+    "     " + cyan("venom list") + dim("               show the 6 packs (sizes + the core roles)"),
+    "     " + cyan("venom add <role>") + dim("         add an optional role to an install"),
+    "     " + cyan("venom guide [topic]") + dim("      this walkthrough (topic: " + GUIDE_TOPICS.join(" | ") + ")"),
+    "     " + cyan("venom tokens") + dim("             token footprint + cost across models/presets"),
+    "     " + cyan("venom models [preset]") + dim("    show or switch the model preset"),
+    "     " + cyan("venom memory <cmd>") + dim("       stats | search | read | compact | index"),
+    "     " + cyan("venom mcp [memory]") + dim("       wiring help, or run the opt-in memory server"),
+    "     " + cyan("venom --help") + dim("             the terse reference  ·  ") + cyan("venom --version"),
+    "",
+    dim("     Most commands take --dir <path> to target a project other than the current folder."),
+    "",
+  ].join("\n");
+}
+
+function guideCost(): string {
+  return [
+    bold("  ▸ cost — control what you spend"),
+    "",
+    "     " + cyan("venom tokens") + dim("             per-turn / per-goal footprint + $/goal for each preset"),
+    "     " + cyan("venom models budget") + dim("      switch the whole team to the cheapest tier (rewrites each role)"),
+    "",
+    "  Three presets: " + bold("quality") + " · " + bold("balanced") + dim(" (default)") + " · " + bold("budget") + ".",
+    dim("     budget drops the heads + workers to Haiku-class and the bosses + review gates from Opus to Sonnet."),
+    dim("     On Claude Code this rewrites each agent's model per-role; on Codex/Gemini it's an advisory."),
+    dim("     Compaction (see `venom guide memory`) is the other lever — it bounds what agents read."),
+    "",
+  ].join("\n");
+}
+
+const GUIDE_SECTIONS: Record<GuideTopic, () => string> = {
+  start: guideStart,
+  memory: guideMemory,
+  mcp: guideMcp,
+  cli: guideCli,
+  cost: guideCost,
+};
+
+function cmdGuide(args: Args): void {
+  const topic = typeof args._[1] === "string" ? args._[1].toLowerCase() : "";
+  if (topic && !(GUIDE_TOPICS as readonly string[]).includes(topic)) {
+    console.error(red(`Unknown guide topic "${topic}". Try: ${GUIDE_TOPICS.join(" | ")}  (or just \`venom guide\`).`));
+    process.exitCode = 1;
+    return;
+  }
+  if (topic) {
+    console.log("\n" + GUIDE_SECTIONS[topic as GuideTopic]());
+    return;
+  }
+  // No topic: the whole walkthrough, overview first.
+  console.log(guideOverview());
+  for (const t of GUIDE_TOPICS) console.log(GUIDE_SECTIONS[t]());
+  console.log(dim("  Tip: `venom guide <topic>` prints just one section.\n"));
 }
 
 async function cmdAdd(args: Args): Promise<void> {
@@ -482,6 +703,7 @@ async function main(): Promise<void> {
     console.log(HELP);
     return;
   }
+  if (cmd === "guide") return cmdGuide(args);
   if (cmd === "init") return cmdInit(args);
   if (cmd === "list") return cmdList();
   if (cmd === "add") return cmdAdd(args);

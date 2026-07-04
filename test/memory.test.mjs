@@ -255,6 +255,43 @@ test("cli e2e: compact --keep 0 archives everything and a second batch is not gl
   }
 });
 
+test("cli e2e: memory search returns ranked refs, read prints one entry, and read blocks a path escape", () => {
+  const dir = mkdtempSync(join(tmpdir(), "venom-view-"));
+  try {
+    run(["init", "--dir", dir, "--tool", "claude-code", "--pack", "solo-minimal", "--name", "View", "--yes"]);
+    writeFileSync(join(dir, "agent-memory", "dev", "log.md"), mkLog(3));
+
+    const found = run(["memory", "search", "task", "--dir", dir]);
+    assert.match(found, /dev\/log\.md#\d/, "search prints entry refs");
+    assert.match(found, /developer-1|task/, "search prints a snippet");
+
+    const one = run(["memory", "read", "dev/log.md#2", "--dir", dir]);
+    assert.match(one, /task 2/, "read prints the requested entry");
+    assert.ok(!/task 1\b/.test(one) && !/task 3\b/.test(one), "read returns a single entry, not the whole file");
+
+    // multi-word query (separate argv words) is joined, not truncated to the first word
+    assert.match(run(["memory", "search", "do", "task", "--dir", dir]), /dev\/log\.md#/, "multi-word search works");
+
+    // --limit must reject non-numeric / bare / negative values, like compact --keep does
+    const badLimit = (v) => {
+      try { run(["memory", "search", "task", "--limit", v, "--dir", dir]); return ""; }
+      catch (e) { return String(e.stderr || e.message); }
+    };
+    assert.match(badLimit("-1"), /numeric value|positive integer/, "search --limit -1 is rejected");
+    assert.match(badLimit("abc"), /positive integer/, "search --limit abc is rejected");
+
+    // The CLI viewer reuses the same realpath-contained resolver as the MCP — escapes must be refused.
+    const escape = (p) => {
+      try { run(["memory", "read", p, "--dir", dir]); return ""; }
+      catch (e) { return String(e.stderr || e.message); }
+    };
+    assert.match(escape("../../secret.md"), /escapes/, "relative traversal blocked");
+    assert.match(escape("/etc/passwd"), /escapes|not found/, "absolute path blocked");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("cli e2e: index --write is idempotent and preserves the human map", () => {
   const dir = mkdtempSync(join(tmpdir(), "venom-m3idx-"));
   try {
