@@ -1,0 +1,86 @@
+{
+  "generatedAt": "2026-07-04T12:39:37.110Z",
+  "methodology": {
+    "tokenProxy": "char/4 (indicative; not an exact tokenizer)",
+    "prices": "directional, from core/model-rates.json (asOf 2026-07)",
+    "pack": "web-app",
+    "boundary": "Venom does not own the LLM call. Model selection lowers COST for the same tokens; lean specs lower the per-turn CONTEXT the agents read; compaction BOUNDS memory growth. None reduce tokens the model spends at inference."
+  },
+  "levers": {
+    "modelSelection": {
+      "pack": "web-app",
+      "perGoalTokens": 58296,
+      "defaultPreset": "balanced",
+      "presets": {
+        "quality": {
+          "costPerGoalUsd": 0.47469599999999995,
+          "blendedInputPerMTok": 8.143
+        },
+        "balanced": {
+          "costPerGoalUsd": 0.37476000000000004,
+          "blendedInputPerMTok": 6.429
+        },
+        "budget": {
+          "costPerGoalUsd": 0.08328000000000003,
+          "blendedInputPerMTok": 1.429
+        }
+      },
+      "budgetVsQualityPctCheaper": 82.5,
+      "budgetVsDefaultPctCheaper": 77.8
+    },
+    "leanSpecs": {
+      "available": true,
+      "specsTotalBefore": 31060,
+      "specsTotalAfter": 28647,
+      "avgSpecBefore": 2219,
+      "avgSpecAfter": 2046,
+      "avgSpecPctSmaller": 7.8,
+      "perTurnBefore": 4337,
+      "perTurnAfter": 4164,
+      "perTurnPctSmaller": 4,
+      "perGoalBefore": 60718,
+      "perGoalAfter": 58296
+    },
+    "memoryCompaction": {
+      "keep": 20,
+      "entryTok": 151,
+      "snapshotTok": 427,
+      "lessonsTok": 214,
+      "scales": [
+        {
+          "entries": 50,
+          "keep": 20,
+          "archived": 30,
+          "logTokBefore": 7611,
+          "logTokAfter": 3060,
+          "hotReadPathBefore": 8252,
+          "hotReadPathAfter": 3701,
+          "hotPctSmaller": 55.2,
+          "byteExactOk": true
+        },
+        {
+          "entries": 200,
+          "keep": 20,
+          "archived": 180,
+          "logTokBefore": 30512,
+          "logTokAfter": 3080,
+          "hotReadPathBefore": 31153,
+          "hotReadPathAfter": 3721,
+          "hotPctSmaller": 88.1,
+          "byteExactOk": true
+        },
+        {
+          "entries": 550,
+          "keep": 20,
+          "archived": 530,
+          "logTokBefore": 84062,
+          "logTokAfter": 3080,
+          "hotReadPathBefore": 84703,
+          "hotReadPathAfter": 3721,
+          "hotPctSmaller": 95.6,
+          "byteExactOk": true
+        }
+      ]
+    }
+  }
+}
