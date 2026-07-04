@@ -58,6 +58,13 @@ write more. Unlogged work did not happen.
 **Read (selectively — never dump the whole tier into your context).** Follow the read order below.
 Never read a whole `log.md`; scan its `###` headers and read only the entries relevant to you.
 
+**If the `venom-memory` MCP tools are available, prefer them over reading/writing these files by hand:**
+use `memory_search` to pull only the slice you need (instead of opening whole files), `memory_read` to
+fetch a specific file or entry, and `memory_append` for the write-after-turn step (it formats and
+blank-line-separates the entry so it stays compaction-safe, and serializes concurrent writes so nothing
+is lost). If the tools are not wired, read and append the files directly, exactly as described here —
+the on-disk protocol is identical either way. Wire the tools with `venom mcp`.
+
 ### The read order (every agent, every task)
 
 1. **`CHARTER.md`** (repo root) — the project's identity, non-negotiables, and scope. The rules.
@@ -76,6 +83,10 @@ Every entry in a `log.md` uses this shape. The `###` header line is what lets ot
 skip — keep it present and descriptive, and **put a blank line before each entry** (every entry is a
 top-level block). `venom memory` finds entry boundaries by that blank-line-separated `### [timestamp]`
 header, so a header you *quote* inside a body (not blank-separated) is safely left part of its entry.
+If you need to quote a real `### [timestamp] …` header inside an entry body, **don't put a blank line
+directly before it** — indent it, fence it in a ``` block, or keep it attached to the line above — so it
+isn't read as the start of a new entry and split off during compaction. (`memory_append` handles this
+for you; this only matters when you hand-edit a log.)
 
 ```
 ### [YYYY-MM-DD HH:MM] <AGENT-NAME> — <short title of the action>

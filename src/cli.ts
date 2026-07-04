@@ -234,7 +234,9 @@ async function cmdInit(args: Args): Promise<void> {
   console.log(`  1. Review ${cyan("CHARTER.md")} — sharpen the non-negotiables and scope. It drives every decision.`);
   console.log(`  2. Read ${cyan(".venom/workflow.md")} — how to drive your team (the leash, the gates, the loops).`);
   const startHint = adapter.meta.startHint ?? `Open this project in ${adapterInfo.name} and give BOSS-1 your first goal.`;
-  console.log(`  3. ${startHint}\n`);
+  console.log(`  3. ${startHint}`);
+  console.log(`  4. ${dim("Optional: run")} ${cyan("venom mcp")} ${dim("to wire the opt-in memory server so agents")}`);
+  console.log(dim("     fetch/append memory with a tool call at inference instead of reading whole files.\n"));
 }
 
 function cmdList(): void {
@@ -367,21 +369,33 @@ function cmdMemory(args: Args): void {
   process.exitCode = 1;
 }
 
+// Clip a tool description to a short one-liner at a word boundary — never mid-abbreviation (the old
+// split-on-"." mangled "e.g." and "vs." into "e" / "vs").
+function clipClause(s: string, max = 78): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > 40 ? cut.slice(0, sp) : cut) + "…";
+}
+
 function printMcpWiring(targetDir: string): void {
   const inProject = existsSync(join(targetDir, ".venom", "install.json"));
   console.log(bold("\n  Venom memory — opt-in MCP server\n"));
   console.log("  Lets your agent fetch the right memory slice (or write one) with a tool call at");
   console.log("  inference, instead of reading whole files. Tools it exposes:");
-  for (const t of MCP_TOOLS) console.log(`    ${cyan(t.name.padEnd(16))} ${dim(t.description.split(".")[0] + ".")}`);
+  for (const t of MCP_TOOLS) console.log(`    ${cyan(t.name.padEnd(16))} ${dim(clipClause(t.description))}`);
   console.log(dim("\n  The server reads/writes this project's agent-memory/. Add it to your tool once:\n"));
 
-  console.log(bold("  Claude Code") + dim("  — project .mcp.json (or: claude mcp add):"));
-  console.log("    claude mcp add venom-memory -- npx -y venomkit mcp memory");
-  console.log(bold("\n  Codex") + dim("  — ~/.codex/config.toml:"));
-  console.log('    [mcp_servers.venom-memory]\n    command = "npx"\n    args = ["-y", "venomkit", "mcp", "memory"]');
+  console.log(bold("  Claude Code") + dim("  — writes .mcp.json in the repo, so teammates get it too:"));
+  console.log("    claude mcp add --scope project venom-memory -- npx -y venomkit mcp memory");
+  console.log(bold("\n  Codex") + dim("  — ~/.codex/config.toml is global, so pin it to THIS project with --dir:"));
+  console.log(`    [mcp_servers.venom-memory]\n    command = "npx"\n    args = ["-y", "venomkit", "mcp", "memory", "--dir", ${JSON.stringify(targetDir)}]`);
   console.log(bold("\n  Gemini CLI") + dim("  — .gemini/settings.json:"));
   console.log('    { "mcpServers": { "venom-memory": { "command": "npx", "args": ["-y", "venomkit", "mcp", "memory"] } } }');
-  console.log(dim("\n  Launch it from the project root so it targets this project's memory (or pass --dir)."));
+  console.log(dim("\n  Launch it from the project root so it targets this project's memory (or pass --dir <path>)."));
+  console.log(dim("  Writes are lock-serialized for agents on ONE machine; sharing agent-memory/ across hosts"));
+  console.log(dim("  assumes each host has a unique hostname. Appends mutate shared files under agent-memory/."));
   if (!inProject) console.log(yellow("\n  ! No Venom install detected here — run `venom init` first so there's an agent-memory/ to serve."));
   console.log("");
 }
