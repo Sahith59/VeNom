@@ -4,6 +4,10 @@
 import { searchMemory, readMemoryPath, appendEntry, renderStats, renderCompact, loadBudgets } from "./memory.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
+// The version this hand-rolled server was actually built and tested against. Per the MCP spec, we echo
+// the client's requested version only if we support it; otherwise we answer with our own version rather
+// than claiming to speak one we don't.
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([PROTOCOL_VERSION]);
 
 export interface ServerCtx {
   memDir: string;
@@ -162,7 +166,7 @@ export function handleMessage(msg: JsonRpc, ctx: ServerCtx): object | null {
       jsonrpc: "2.0",
       id,
       result: {
-        protocolVersion: str(params?.protocolVersion) ?? PROTOCOL_VERSION,
+        protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.has(str(params?.protocolVersion) ?? "") ? str(params?.protocolVersion) : PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: { name: "venom-memory", version: ctx.version },
       },
@@ -194,6 +198,11 @@ function processLine(line: string, ctx: ServerCtx): void {
     parsed = JSON.parse(t);
   } catch {
     return; // non-JSON line: can't attribute an id, so drop it
+  }
+  if (Array.isArray(parsed) && parsed.length === 0) {
+    // An empty batch is itself an Invalid Request per JSON-RPC 2.0 — reply with a single -32600.
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } }) + "\n");
+    return;
   }
   const msgs = Array.isArray(parsed) ? parsed : [parsed]; // support JSON-RPC batches
   const out: object[] = [];

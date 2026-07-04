@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync, utimesSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync, utimesSync, readdirSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,6 +201,26 @@ test("path safety: realpath containment blocks a symlinked ancestor dir (read AN
   }
 });
 
+test("protocol: initialize clamps an unsupported protocolVersion to one the server actually speaks", () => {
+  const dir = project();
+  try {
+    const c = ctx(dir);
+    // supported version -> echoed
+    const ok = handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } }, c);
+    assert.equal(ok.result.protocolVersion, "2024-11-05", "a supported version is echoed");
+    // bogus / unsupported version -> server answers with its OWN version, never claims to speak one it doesn't
+    for (const bogus of ["1999-01-01-BOGUS", "2025-06-18", "", "not-a-version"]) {
+      const r = handleMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: bogus } }, c);
+      assert.equal(r.result.protocolVersion, "2024-11-05", `unsupported "${bogus}" clamped to the server's version`);
+    }
+    // missing/non-string -> default
+    assert.equal(handleMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: {} }, c).result.protocolVersion, "2024-11-05");
+    assert.equal(handleMessage({ jsonrpc: "2.0", id: 4, method: "initialize", params: { protocolVersion: 5 } }, c).result.protocolVersion, "2024-11-05");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("protocol: a request-shaped NOTIFICATION (no id) gets no reply and runs no side effect; non-object -> -32600", () => {
   const dir = project();
   try {
@@ -248,6 +268,39 @@ test("append lock: a crashed writer's lock (dead pid) is stolen so appends recov
     const r = appendEntry(mem, { team: "dev", agent: "x", title: "recovered" }, new Date(2025, 0, 1));
     assert.match(r.ref, /dev\/log\.md#/);
     assert.equal(existsSync(lock), false, "lock released after the append");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("append lock: N writers recovering from a crashed writer's lock AT ONCE all land (steal-race, no lost update)", async () => {
+  // Regression for the steal-then-re-race TOCTOU: a dead-pid lock is stealable by everyone at the same
+  // instant; the old blind rename could remove a lock re-acquired mid-recovery and let two writers into
+  // the critical section -> one append silently lost. This exercises dead-lock + CONCURRENT recovery.
+  const dir = project("solo-minimal");
+  try {
+    const mem = join(dir, "agent-memory");
+    const dev = join(mem, "dev");
+    const log = join(dev, "log.md");
+    const lock = `${log}.lock`;
+    writeFileSync(log, "# dev team - log (append-only)\n\n---\n");
+    writeFileSync(lock, `999999\n${hostname()}\ndead`); // a crashed writer's lock (pid not alive)
+    const memJs = join(ROOT, "dist", "memory.js");
+    const N = 12;
+    const codes = Array.from({ length: N }, (_, i) =>
+      new Promise((res, rej) => {
+        const code = `const{appendEntry}=require(${JSON.stringify(memJs)});appendEntry(${JSON.stringify(mem)},{team:"dev",agent:"a${i}",title:"steal-${i}"},new Date());`;
+        spawn(process.execPath, ["-e", code], { stdio: "ignore" }).on("close", (c) => (c === 0 ? res() : rej(new Error(`append ${i} failed`))));
+      }),
+    );
+    await Promise.all(codes);
+    const content = readFileSync(log, "utf8");
+    const entries = parseLog(content).entries.length;
+    assert.equal(entries, N, `all ${N} concurrent recoverers landed (no lost update); got ${entries}`);
+    const titles = new Set([...content.matchAll(/steal-(\d+)/g)].map((m) => m[0]));
+    assert.equal(titles.size, N, "every writer's entry is present exactly once (no dup, no loss)");
+    const leaks = readdirSync(dev).filter((f) => f.includes(".lock") || f.includes(".steal") || f.includes(".venom-tmp"));
+    assert.deepEqual(leaks, [], `no lock/steal/tmp files leaked, saw: ${leaks.join(", ")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -321,16 +374,20 @@ test("cli integration: `venom mcp memory` speaks JSON-RPC over stdio and closes 
     send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } });
     send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "memory_stats", arguments: {} } });
+    srv.stdin.write("[]\n"); // empty JSON-RPC batch -> a single -32600 (Invalid Request)
+    srv.stdin.write("not json\n"); // unparseable line -> silently dropped, must not crash the stream
 
     const code = await new Promise((res) => {
       setTimeout(() => srv.stdin.end(), 400);
       srv.on("close", res);
     });
     assert.equal(code, 0, "server exits cleanly on stdin close");
-    const byId = Object.fromEntries(responses.filter((r) => r.id !== undefined).map((r) => [r.id, r]));
+    const byId = Object.fromEntries(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
     assert.equal(byId[1].result.serverInfo.name, "venom-memory");
     assert.equal(byId[2].result.tools.length, 5);
     assert.match(byId[3].result.content[0].text, /hot read-path/);
+    const emptyBatch = responses.find((r) => r.id === null && r.error && r.error.code === -32600);
+    assert.ok(emptyBatch, "empty batch [] -> a single -32600 Invalid Request");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
