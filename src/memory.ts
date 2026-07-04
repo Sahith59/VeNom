@@ -6,8 +6,24 @@
 //   compact — move old team-log entries out of the hot log into a verbatim archive (never deletes).
 //   index   — regenerate INDEX.md's entry catalog so agents scan an index instead of whole logs.
 // Compaction is byte-exact, archive-not-delete, dry-run by default, and idempotent.
-import { readFileSync, writeFileSync, existsSync, readdirSync, lstatSync, renameSync } from "node:fs";
-import { join, relative, basename } from "node:path";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  lstatSync,
+  statSync,
+  renameSync,
+  mkdirSync,
+  realpathSync,
+  openSync,
+  closeSync,
+  readSync,
+  writeSync,
+  unlinkSync,
+} from "node:fs";
+import { join, relative, basename, resolve, dirname, sep } from "node:path";
+import { hostname } from "node:os";
 import { bold, dim, green, yellow, cyan } from "./style.js";
 import { estTokens } from "./tokens.js";
 
@@ -187,22 +203,154 @@ function walk(dir: string): string[] {
   return out;
 }
 
+let tmpCounter = 0;
 function writeFileAtomic(path: string, content: string): void {
-  const tmp = `${path}.venom-tmp`;
+  // Unique temp name (pid + counter) so two writers on the same file never clobber each other's temp.
+  const tmp = `${path}.${process.pid}.${++tmpCounter}.venom-tmp`;
   writeFileSync(tmp, content);
   renameSync(tmp, path); // atomic on the same filesystem — no half-written log.md on crash/disk-full
 }
 
+function sleepMs(ms: number): void {
+  // zero-dep synchronous sleep (no busy-wait): block this thread on an untouched SharedArrayBuffer.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+const HOST = hostname();
+const HARD_STALE_MS = 120000; // last-resort steal when we CAN'T check liveness (cross-host lock)
+let lockNonce = 0;
+
+interface LockOwner {
+  pid: number;
+  host: string;
+  nonce: string;
+}
+function readLockOwner(lockPath: string): LockOwner | null {
+  try {
+    const [pid, host, nonce] = readFileSync(lockPath, "utf8").split("\n");
+    return { pid: Number(pid), host: host ?? "", nonce: nonce ?? "" };
+  } catch {
+    return null;
+  }
+}
+// Same-host: ask the OS whether the holder pid is alive. Cross-host: we can't, so report alive.
+function holderAlive(owner: LockOwner): boolean {
+  if (owner.host !== HOST) return true;
+  if (!Number.isInteger(owner.pid) || owner.pid <= 0) return false;
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH"; // EPERM etc. -> exists (alive)
+  }
+}
+
+// Serialize a read-modify-write on `path` across processes with an exclusive lockfile so two agents
+// appending (or a compact racing an append) can't lost-update each other.
+//
+// Stealing is owner-verified, not time-only: we steal a same-host lock ONLY when the holder pid is
+// confirmed dead (a crash), so a live-but-slow / suspended / clock-skewed holder is NEVER stolen (it
+// would silently clobber that holder's write). A cross-host lock we can't probe, so we fall back to a
+// long HARD_STALE cap. Release only unlinks the lock if it's still ours (a stolen lock belongs to the
+// successor now — removing it would cascade). Fail-closed: give up after ~15s with a "busy" error
+// rather than risk a steal.
+function withLock<T>(path: string, fn: () => T): T {
+  const lockPath = `${path}.lock`;
+  const nonce = `${process.pid}-${Date.now()}-${++lockNonce}`;
+  const content = `${process.pid}\n${HOST}\n${nonce}`;
+  const deadline = Date.now() + 15000;
+  let fd: number;
+  for (;;) {
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const owner = readLockOwner(lockPath);
+      let ageMs = Infinity;
+      try {
+        ageMs = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        continue; // lock vanished between open and stat — retry immediately
+      }
+      const deadCrash = owner !== null && owner.host === HOST && !holderAlive(owner);
+      const crossHostStale = (owner === null || owner.host !== HOST) && ageMs > HARD_STALE_MS;
+      if (deadCrash || crossHostStale) {
+        // Claim the abandoned lock atomically with rename — only ONE racing process can win the
+        // rename, so two stealers can't both proceed; then remove it and re-loop to openSync('wx').
+        try {
+          const claim = `${lockPath}.${process.pid}.steal`;
+          renameSync(lockPath, claim);
+          unlinkSync(claim);
+        } catch {
+          /* another process won the steal, or it already vanished — fine */
+        }
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`"${basename(path)}" is busy — another writer holds the lock (retry shortly)`);
+      sleepMs(50);
+      continue;
+    }
+    // We created the lock. Write our identity; if the write fails (e.g. ENOSPC after the inode was
+    // created), clean up the orphan and the fd rather than leaving an empty lockfile behind.
+    try {
+      writeSync(fd, content);
+    } catch (werr) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        /* ignore */
+      }
+      throw werr;
+    }
+    break;
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    // Only remove the lock if it is STILL ours — if we were stolen (should only happen cross-host),
+    // the lock now belongs to the successor and removing it would let a third writer in.
+    try {
+      const cur = readLockOwner(lockPath);
+      if (cur === null || cur.nonce === nonce) unlinkSync(lockPath);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function safeTruncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let end = max;
+  const c = s.charCodeAt(end - 1);
+  if (c >= 0xd800 && c <= 0xdbff) end -= 1; // don't cut a surrogate pair in half
+  return s.slice(0, end);
+}
+
 export function scanMemory(memDir: string): MemFile[] {
-  return walk(memDir)
-    .map((abs) => {
-      const rel = relative(memDir, abs).split("\\").join("/");
-      const content = readFileSync(abs, "utf8");
-      const category = categorize(rel);
-      const entries = category === "log" || category === "archive" ? parseLog(content).entries.length : null;
-      return { abs, rel, tok: estTokens(content), category, entries };
-    })
-    .sort((a, b) => b.tok - a.tok);
+  const out: MemFile[] = [];
+  for (const abs of walk(memDir)) {
+    let content: string;
+    try {
+      content = readFileSync(abs, "utf8");
+    } catch {
+      continue; // unreadable/removed — don't let one file break stats or search
+    }
+    const rel = relative(memDir, abs).split("\\").join("/");
+    const category = categorize(rel);
+    const entries = category === "log" || category === "archive" ? parseLog(content).entries.length : null;
+    out.push({ abs, rel, tok: estTokens(content), category, entries });
+  }
+  return out.sort((a, b) => b.tok - a.tok);
 }
 
 function fmt(n: number): string {
@@ -283,9 +431,31 @@ export function renderCompact(memDir: string, opts: { keep?: number; budgetTok?:
   let totalMoved = 0;
   let totalFreed = 0;
   for (const logPath of logs) {
-    const content = readFileSync(logPath, "utf8");
-    const plan = planCompact(content, { keep, budgetTok: opts.budgetTok });
     const rel = relative(memDir, logPath).split("\\").join("/");
+    const doWrite = (): CompactPlan => {
+      let content: string;
+      try {
+        content = readFileSync(logPath, "utf8");
+      } catch {
+        return { total: 0, keptCount: 0, movedCount: 0, freedTok: 0, remaining: "", archivedEntries: "" };
+      }
+      const p = planCompact(content, { keep, budgetTok: opts.budgetTok });
+      if (write && p.movedCount > 0) {
+        const team = basename(relative(memDir, join(logPath, "..")).split("\\").join("/")) || "team";
+        const archivePath = join(logPath, "..", "log.archive.md");
+        const existing = existsSync(archivePath) ? readFileSync(archivePath, "utf8") : archiveHeader(team);
+        const gap = existing.endsWith("\n") ? "" : "\n";
+        // Archive first, then truncate the log — both atomic. If the process dies between the two, the
+        // moved entries are safe in the archive and still in the log (a recoverable duplicate on the
+        // next run), never lost.
+        writeFileAtomic(archivePath, existing + gap + p.archivedEntries);
+        writeFileAtomic(logPath, p.remaining);
+      }
+      return p;
+    };
+    // When writing, hold the per-log lock across the re-read + plan + write so a concurrent append is
+    // not lost; a dry run only reads, so it needs no lock.
+    const plan = write ? withLock(logPath, doWrite) : doWrite();
     if (plan.movedCount === 0) {
       L.push(`  ${dim("—")} ${rel}  ${dim(`${plan.total} entries · nothing to archive`)}`);
       continue;
@@ -293,17 +463,6 @@ export function renderCompact(memDir: string, opts: { keep?: number; budgetTok?:
     totalMoved += plan.movedCount;
     totalFreed += plan.freedTok;
     L.push(`  ${green("→")} ${rel}  ${dim(`${plan.total} entries → keep ${plan.keptCount}, archive ${plan.movedCount} (~${fmt(plan.freedTok)} tok off the hot path)`)}`);
-    if (write) {
-      const team = basename(relative(memDir, join(logPath, "..")).split("\\").join("/")) || "team";
-      const archivePath = join(logPath, "..", "log.archive.md");
-      const existing = existsSync(archivePath) ? readFileSync(archivePath, "utf8") : archiveHeader(team);
-      const sep = existing.endsWith("\n") ? "" : "\n";
-      // Archive first, then truncate the log — both atomic. If the process dies between the two, the
-      // moved entries are safe in the archive and still in the log (a recoverable duplicate on the
-      // next run), never lost.
-      writeFileAtomic(archivePath, existing + sep + plan.archivedEntries);
-      writeFileAtomic(logPath, plan.remaining);
-    }
   }
   L.push("");
   if (totalMoved === 0) {
@@ -326,7 +485,15 @@ const CAT_END = "<!-- VENOM:END memory-catalog -->";
 
 export function buildCatalog(memDir: string): string {
   const logs = findLogs(memDir)
-    .map((p) => ({ p, rel: relative(memDir, p).split("\\").join("/"), entries: parseLog(readFileSync(p, "utf8")).entries }))
+    .map((p) => {
+      let entries: string[] = [];
+      try {
+        entries = parseLog(readFileSync(p, "utf8")).entries;
+      } catch {
+        /* unreadable log — skip it rather than fail the whole index */
+      }
+      return { p, rel: relative(memDir, p).split("\\").join("/"), entries };
+    })
     .filter((l) => l.entries.length > 0)
     .sort((a, b) => a.rel.localeCompare(b.rel));
 
@@ -410,4 +577,234 @@ export function renderIndex(memDir: string, write: boolean): string {
   }
   L.push("");
   return L.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval / read / append — the operations the opt-in MCP server exposes so an
+// agent can fetch the right memory slice (or write one) with a tool call at inference,
+// instead of reading whole files. Lexical (keyword) retrieval with field weighting —
+// honest about being keyword-based, not embeddings.
+// ---------------------------------------------------------------------------
+
+const FIELD_WEIGHT: Record<string, number> = {
+  snapshot: 5,
+  lessons: 4,
+  distilled: 4,
+  decisions: 3,
+  adr: 3,
+  index: 2,
+  log: 2,
+  archive: 1,
+  readme: 0,
+  other: 1,
+};
+
+const KNOWN_TEAMS = ["dev", "research", "review", "security"];
+const SAFE_SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+export interface SearchHit {
+  ref: string;
+  field: string;
+  score: number;
+  snippet: string;
+}
+
+function tokenize(s: string): string[] {
+  return s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+}
+
+function makeSnippet(text: string, qset: Set<string>): string {
+  const lines = text.split("\n").map((l) => l.trim());
+  const head = lines[0] ?? "";
+  const hit = lines.find((l) => tokenize(l).some((t) => qset.has(t))) ?? "";
+  const s = hit && hit !== head ? `${head} … ${hit}` : head || hit;
+  return s.length > 240 ? safeTruncate(s, 237) + "…" : s;
+}
+
+function chunksOf(rel: string, category: string, content: string): Array<{ ref: string; text: string }> {
+  if (category === "log" || category === "archive") {
+    return parseLog(content).entries.map((e, i) => ({ ref: `${rel}#${i + 1}`, text: e }));
+  }
+  if (content.length > 1200) {
+    const parts = content.split(/(?=^#{1,4} )/m).filter((p) => p.trim());
+    if (parts.length > 1) return parts.map((p, i) => ({ ref: `${rel}#s${i + 1}`, text: p }));
+  }
+  return [{ ref: rel, text: content }];
+}
+
+export function searchMemory(memDir: string, query: string, opts: { limit?: number; includeArchived?: boolean } = {}): SearchHit[] {
+  const limit = Number.isFinite(opts.limit) ? Math.max(1, Math.min(50, Math.floor(opts.limit as number))) : 8;
+  const qTerms = Array.from(new Set(tokenize(query)));
+  if (qTerms.length === 0) return [];
+  const qset = new Set(qTerms);
+  const hits: SearchHit[] = [];
+  // Walk + read lazily here (not via scanMemory) so we skip archives entirely when not requested and
+  // never read cold storage we won't use; a single unreadable file is skipped, not fatal.
+  for (const abs of walk(memDir)) {
+    const rel = relative(memDir, abs).split("\\").join("/");
+    const category = categorize(rel);
+    if (category === "readme") continue; // the protocol doc, not project memory
+    if (category === "archive" && !opts.includeArchived) continue;
+    let content: string;
+    try {
+      content = readFileSync(abs, "utf8");
+    } catch {
+      continue; // unreadable/removed mid-scan — skip, don't fail the whole search
+    }
+    for (const ch of chunksOf(rel, category, content)) {
+      const toks = tokenize(ch.text);
+      if (toks.length === 0) continue;
+      const counts = new Map<string, number>();
+      for (const t of toks) if (qset.has(t)) counts.set(t, (counts.get(t) ?? 0) + 1);
+      if (counts.size === 0) continue;
+      let occ = 0;
+      for (const c of counts.values()) occ += c;
+      const score = counts.size * 10 + occ + (FIELD_WEIGHT[category] ?? 1);
+      hits.push({ ref: ch.ref, field: category, score, snippet: makeSnippet(ch.text, qset) });
+    }
+  }
+  hits.sort((a, b) => b.score - a.score || a.ref.localeCompare(b.ref));
+  return hits.slice(0, limit);
+}
+
+// True only if `abs` really resolves inside memDir — realpath-based, so a symlinked ANCESTOR directory
+// (e.g. agent-memory/dev -> /) cannot smuggle the target outside the tree. For a not-yet-existing
+// target (a new log to create), we realpath its nearest existing ancestor.
+function realWithin(memDir: string, abs: string): boolean {
+  let realMem: string;
+  try {
+    realMem = realpathSync(resolve(memDir));
+  } catch {
+    return false;
+  }
+  let probe = abs;
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return false;
+    probe = parent;
+  }
+  let real: string;
+  try {
+    real = realpathSync(probe);
+  } catch {
+    return false;
+  }
+  return real === realMem || real.startsWith(realMem + sep);
+}
+
+// Resolve a caller-supplied path safely inside memDir (no traversal, no symlink escape).
+function safeResolve(memDir: string, relPath: string): string {
+  const abs = resolve(memDir, relPath.replace(/^[/\\]+/, ""));
+  const norm = resolve(memDir);
+  if ((abs !== norm && !abs.startsWith(norm + sep)) || !realWithin(memDir, abs)) throw new Error("path escapes agent-memory/");
+  return abs;
+}
+
+export interface ReadResult {
+  ref: string;
+  text: string;
+  entries?: number;
+}
+
+export function readMemoryPath(memDir: string, relPath: string, entry?: number): ReadResult {
+  if (typeof relPath !== "string" || !relPath.trim()) throw new Error("path is required");
+  // Accept a search-style ref fragment so results round-trip: "dev/log.md#3" (entry) or "notes.md#s2" (section).
+  let cleanPath = relPath;
+  let frag: { section: boolean; n: number } | undefined;
+  const m = relPath.match(/#(s?)(\d+)$/);
+  if (m) {
+    cleanPath = relPath.slice(0, m.index);
+    frag = { section: m[1] === "s", n: Number(m[2]) };
+  }
+  if (entry != null) {
+    if (!Number.isInteger(entry) || entry < 1) throw new Error("entry must be a positive integer");
+    frag = { section: false, n: entry };
+  }
+  const abs = safeResolve(memDir, cleanPath);
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    throw new Error(`not found: ${cleanPath}`);
+  }
+  if (!st.isFile()) throw new Error(`not a file: ${cleanPath}`);
+  const rel = relative(memDir, abs).split("\\").join("/");
+  const MAX_READ = 2_000_000;
+  let content: string;
+  if (st.size > MAX_READ) {
+    const fd = openSync(abs, "r");
+    try {
+      const buf = Buffer.alloc(MAX_READ);
+      const n = readSync(fd, buf, 0, MAX_READ, 0);
+      content = buf.subarray(0, n).toString("utf8") + `\n…[${rel} is ${st.size} bytes — showing the first ${MAX_READ}; narrow with memory_search or an entry number]`;
+    } finally {
+      closeSync(fd);
+    }
+  } else {
+    content = readFileSync(abs, "utf8");
+  }
+  if (frag && !frag.section) {
+    const entries = parseLog(content).entries;
+    const e = entries[frag.n - 1];
+    if (!e) throw new Error(`entry ${frag.n} not found — ${rel} has ${entries.length} entries`);
+    return { ref: `${rel}#${frag.n}`, text: e, entries: entries.length };
+  }
+  if (frag && frag.section) {
+    const secs = content.split(/(?=^#{1,4} )/m).filter((p) => p.trim());
+    const s = secs[frag.n - 1];
+    if (!s) throw new Error(`section ${frag.n} not found — ${rel} has ${secs.length} sections`);
+    return { ref: `${rel}#s${frag.n}`, text: s };
+  }
+  return { ref: rel, text: content };
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+export interface AppendInput {
+  team: string;
+  agent: string;
+  title: string;
+  task?: string;
+  did?: string;
+  result?: string;
+  refs?: string;
+  next?: string;
+}
+
+// Append a correctly-formatted, blank-line-separated entry (so compaction/indexing find it).
+export function appendEntry(memDir: string, e: AppendInput, now: Date): { ref: string; header: string } {
+  if (!SAFE_SLUG.test(e.team) || !KNOWN_TEAMS.includes(e.team)) throw new Error(`unknown team "${e.team}" — use one of: ${KNOWN_TEAMS.join(", ")}`);
+  const clean = (v: string | undefined): string => (v ?? "").replace(/[\r\n\u2028\u2029]+/g, " ").trim();
+  const agent = clean(e.agent);
+  const title = clean(e.title);
+  if (!agent) throw new Error("agent is required");
+  if (!title) throw new Error("title is required");
+  const ts = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const lines = [`### [${ts}] ${agent} — ${title}`];
+  const field = (label: string, v?: string): void => {
+    const c = clean(v);
+    if (c) lines.push(`- **${label}:** ${c}`);
+  };
+  field("Task", e.task);
+  field("Did", e.did);
+  field("Result", e.result);
+  field("Refs", e.refs);
+  field("Next / who needs to know", e.next);
+  const entryText = lines.join("\n") + "\n";
+
+  const teamDir = safeResolve(memDir, e.team);
+  if (!existsSync(teamDir)) mkdirSync(teamDir, { recursive: true });
+  const logPath = join(teamDir, "log.md");
+  // Hold an exclusive lock across the whole read-modify-write so two agents appending to the same
+  // team log cannot lost-update each other (the shared file is the only channel between agents).
+  const count = withLock(logPath, () => {
+    const base = existsSync(logPath) ? readFileSync(logPath, "utf8") : `# ${e.team} team — log (append-only)\n\n---\n`;
+    const existing = base.replace(/\n*$/, "\n\n"); // guarantee blank-line separation before the new entry
+    const full = existing + entryText;
+    writeFileAtomic(logPath, full);
+    return parseLog(full).entries.length;
+  });
+  return { ref: `${e.team}/log.md#${count}`, header: lines[0]! };
 }

@@ -8,6 +8,7 @@ import { loadAdapter, detectTool, ADAPTERS } from "./tool.js";
 import { renderTokens } from "./tokens.js";
 import { loadModels, resolvePreset, presetNames } from "./models.js";
 import { loadBudgets, renderStats, renderCompact, renderIndex } from "./memory.js";
+import { runMemoryServer, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { bold, dim, cyan, green, yellow, red } from "./style.js";
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -72,6 +73,8 @@ ${bold("Usage")}
   venom tokens [--pack <id>]  Estimate the token footprint + cost across models
   venom models [preset]     Show or switch the model preset (quality/balanced/budget)
   venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
+  venom mcp memory          Run the opt-in MCP memory server (agent calls tools at inference)
+  venom mcp                 Show how to wire the MCP server into Claude Code / Codex / Gemini
   venom --version           Print the version
   venom --help              Show this help
 
@@ -364,6 +367,47 @@ function cmdMemory(args: Args): void {
   process.exitCode = 1;
 }
 
+function printMcpWiring(targetDir: string): void {
+  const inProject = existsSync(join(targetDir, ".venom", "install.json"));
+  console.log(bold("\n  Venom memory — opt-in MCP server\n"));
+  console.log("  Lets your agent fetch the right memory slice (or write one) with a tool call at");
+  console.log("  inference, instead of reading whole files. Tools it exposes:");
+  for (const t of MCP_TOOLS) console.log(`    ${cyan(t.name.padEnd(16))} ${dim(t.description.split(".")[0] + ".")}`);
+  console.log(dim("\n  The server reads/writes this project's agent-memory/. Add it to your tool once:\n"));
+
+  console.log(bold("  Claude Code") + dim("  — project .mcp.json (or: claude mcp add):"));
+  console.log("    claude mcp add venom-memory -- npx -y venomkit mcp memory");
+  console.log(bold("\n  Codex") + dim("  — ~/.codex/config.toml:"));
+  console.log('    [mcp_servers.venom-memory]\n    command = "npx"\n    args = ["-y", "venomkit", "mcp", "memory"]');
+  console.log(bold("\n  Gemini CLI") + dim("  — .gemini/settings.json:"));
+  console.log('    { "mcpServers": { "venom-memory": { "command": "npx", "args": ["-y", "venomkit", "mcp", "memory"] } } }');
+  console.log(dim("\n  Launch it from the project root so it targets this project's memory (or pass --dir)."));
+  if (!inProject) console.log(yellow("\n  ! No Venom install detected here — run `venom init` first so there's an agent-memory/ to serve."));
+  console.log("");
+}
+
+function cmdMcp(args: Args): void {
+  const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
+  const sub = args._[1];
+  if (sub === "memory") {
+    const memDir = join(targetDir, "agent-memory");
+    if (!existsSync(memDir)) {
+      console.error(red(`No agent-memory/ found in ${targetDir}. Run \`venom init\` first, or pass --dir <project>.`));
+      process.exitCode = 1;
+      return;
+    }
+    // Runs until stdin closes; must not write anything but JSON-RPC to stdout.
+    runMemoryServer({ memDir, coreDir: CORE, version: readVersion(), now: () => new Date() });
+    return;
+  }
+  if (sub === undefined) {
+    printMcpWiring(targetDir);
+    return;
+  }
+  console.error(red(`Unknown mcp subcommand "${sub}". Use: venom mcp memory  (run the server)  ·  venom mcp  (wiring help).`));
+  process.exitCode = 1;
+}
+
 async function cmdAdd(args: Args): Promise<void> {
   const targetDir = resolve(typeof args.dir === "string" ? args.dir : process.cwd());
   const role = args._[1];
@@ -422,6 +466,7 @@ async function main(): Promise<void> {
   if (cmd === "tokens") return cmdTokens(args);
   if (cmd === "models") return cmdModels(args);
   if (cmd === "memory") return cmdMemory(args);
+  if (cmd === "mcp") return cmdMcp(args);
   console.error(red(`Unknown command "${cmd}".`));
   console.log(HELP);
   process.exitCode = 1;

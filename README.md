@@ -203,6 +203,8 @@ venom add <role>          Add an optional role to an existing install
 venom tokens [--pack <id>]  Estimate token footprint + cost across models/presets
 venom models [preset]     Show or switch the model preset (quality | balanced | budget)
 venom memory <cmd>        Inspect & bound shared memory (stats | compact | index)
+venom mcp memory          Run the opt-in MCP memory server (agent calls tools at inference)
+venom mcp                 Show how to wire the MCP server into Claude Code / Codex / Gemini
 venom --version           Print the version
 venom --help              Full help
 
@@ -231,6 +233,16 @@ deleted** — to bound what agents read each turn; `venom memory index --write` 
 entry catalog so agents scan an index instead of whole logs. Compaction is a safe dry run by default.
 Honest scope: Venom doesn't own the model's inference, so these keep memory bounded and navigable —
 they can't force selective reading; boss-1 (or you) runs them to keep the tier lean.
+
+**Runtime memory (opt-in MCP).** For the one place Venom *can* help at inference, `venom mcp memory`
+runs a small [MCP](https://modelcontextprotocol.io) server that exposes the shared memory as tools the
+agent calls directly — `memory_search` (keyword retrieval with field weighting, so it pulls the
+relevant slice instead of reading whole files), `memory_read`, `memory_append` (the write-after-turn
+step, formatted so it stays compaction-safe), `memory_stats`, and `memory_compact`. It's **opt-in**
+and **zero-dependency** (hand-rolled JSON-RPC, no SDK). Run `venom mcp` for the one-line wiring for
+Claude Code, Codex, or Gemini. Path-contained to `agent-memory/` (realpath-checked, no symlink escape),
+and writes are lock-serialized so concurrent agents on one machine can't lose an append. (Sharing one
+`agent-memory/` across multiple hosts assumes unique hostnames — the usual single-machine setup is safe.)
 
 ## Extend it
 
