@@ -8,7 +8,7 @@
 If you are an agent: you read the Charter (`CHARTER.md`) and this tier at the start of every task,
 and you write your result here before you finish. If you skip the write, your work is invisible to
 the rest of the team and lost at the next context reset. That is not a style preference — it is the
-mechanism that makes 23 isolated agents behave as one coordinated team.
+mechanism that makes a team of isolated agents behave as one coordinated team.
 
 ---
 

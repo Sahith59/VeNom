@@ -73,7 +73,7 @@ Nothing is clobbered on re-run: your `CHARTER.md`, your own notes in `CLAUDE.md`
 
 > That's the **Claude Code** layout. `--tool codex` installs the same team as an `AGENTS.md` brief
 > plus `.venom/agents/` role specs; `--tool gemini` installs it as `GEMINI.md` plus `/venom:<role>`
-> slash-commands under `.gemini/commands/`. Same core, same memory — mapped to each tool's native shape.
+> slash-commands under `.gemini/commands/venom/`. Same core, same memory — mapped to each tool's native shape.
 
 ## The two ideas that make it a team (not a pile of prompts)
 
@@ -177,8 +177,8 @@ Project specifics live only in the generated `CHARTER.md`; the agent specs stay 
 Charter at runtime. Each adapter maps that one core onto its tool's **native** primitives — so the
 team is real in each, and each adapter's README notes exactly where a tool's mechanism differs (e.g.
 Claude Code trims each role's tools — the `critics`/`security` gates get no Edit/Write; Codex and
-Gemini carry that as instruction plus the tool's own sandbox). Adapters ship as plain ESM + JSON with no build step — so
-adding a tool is one file, not a rewrite.
+Gemini carry that as instruction plus the tool's own sandbox). Adapters ship as plain ESM modules plus
+JSON/Markdown templates with no build step — so adding a tool is one file, not a rewrite.
 
 **Deeper diagrams** — the core↔adapter mapping, how agents coordinate through shared memory, and the
 review loop — are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
