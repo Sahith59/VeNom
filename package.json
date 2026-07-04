@@ -25,7 +25,7 @@
     "url": "git+https://github.com/Sahith59/VeNom.git"
   },
   "license": "MIT",
-  "author": "Sahith Reddy Thummala <sahith0904@gmail.com>",
+  "author": "Sahith Reddy Thummala <tsahith59@gmail.com>",
   "type": "module",
   "bin": {
     "venom": "bin/venom.js",
