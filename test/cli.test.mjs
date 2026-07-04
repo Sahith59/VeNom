@@ -95,6 +95,13 @@ test("cli guide walks a new user through everything; a topic narrows it; a bad t
   assert.match(mem, /venom memory search/, "points to the CLI viewer");
   assert.ok(!/from zero to your first goal/.test(mem), "a topic prints only its own section");
 
+  // The mcp topic documents the agent router honestly (keyword matching, not "AI picks the agent").
+  const mcp = run(["guide", "mcp"]);
+  assert.match(mcp, /route/, "mcp topic mentions the route tool");
+  assert.match(mcp, /handoff/, "mcp topic mentions the handoff tool");
+  assert.match(mcp, /Honest keyword/, "honest: it's keyword matching");
+  assert.match(mcp, /boss-1 is still the real router/, "honest: boss-1 is the real router, not the tool");
+
   // Honesty guard: the budget cost claim must never regress to "gates stay on the strong model"
   // (the exact defect a prior audit caught). budget downshifts the gates Opus->Sonnet.
   const cost = run(["guide", "cost"]);

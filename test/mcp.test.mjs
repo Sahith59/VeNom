@@ -28,7 +28,7 @@ function project(pack = "web-app") {
   return dir;
 }
 function ctx(dir) {
-  return { memDir: join(dir, "agent-memory"), coreDir: CORE, version: "9.9.9", now: NOW };
+  return { memDir: join(dir, "agent-memory"), coreDir: CORE, projectDir: dir, version: "9.9.9", now: NOW };
 }
 function call(dir, name, args) {
   const r = handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, ctx(dir));
@@ -46,7 +46,7 @@ test("protocol: initialize, tools/list, ping, notification (no reply), unknown m
     assert.ok(init.result.capabilities.tools, "advertises tools capability");
 
     const list = handleMessage({ jsonrpc: "2.0", id: 2, method: "tools/list" }, c);
-    assert.equal(list.result.tools.length, 5);
+    assert.equal(list.result.tools.length, 9);
     for (const t of list.result.tools) assert.ok(t.name && t.description && t.inputSchema, "each tool has name/description/schema");
 
     assert.deepEqual(handleMessage({ jsonrpc: "2.0", id: 3, method: "ping" }, c).result, {});
@@ -390,7 +390,7 @@ test("cli integration: `venom mcp memory` speaks JSON-RPC over stdio and closes 
     assert.equal(code, 0, "server exits cleanly on stdin close");
     const byId = Object.fromEntries(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
     assert.equal(byId[1].result.serverInfo.name, "venom-memory");
-    assert.equal(byId[2].result.tools.length, 5);
+    assert.equal(byId[2].result.tools.length, 9);
     assert.match(byId[3].result.content[0].text, /hot read-path/);
     const emptyBatch = responses.find((r) => r.id === null && r.error && r.error.code === -32600);
     assert.ok(emptyBatch, "empty batch [] -> a single -32600 Invalid Request");
