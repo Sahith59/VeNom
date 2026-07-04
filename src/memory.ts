@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { join, relative, basename, resolve, dirname, sep } from "node:path";
 import { hostname } from "node:os";
+import { randomBytes } from "node:crypto";
 import { bold, dim, green, yellow, cyan } from "./style.js";
 import { estTokens } from "./tokens.js";
 
@@ -218,7 +219,14 @@ function sleepMs(ms: number): void {
 
 const HOST = hostname();
 const HARD_STALE_MS = 120000; // last-resort steal when we CAN'T check liveness (cross-host lock)
+const STEAL_STALE_MS = 10000; // a steal-token is held for microseconds; older than this ⇒ orphaned
 let lockNonce = 0;
+// A lock/token nonce must be unique across every contender on the same file. pid+counter already
+// distinguishes separate processes on one host; the random suffix makes it unique even when pid is
+// shared (e.g. worker threads) or across hosts, so ownership/release checks can never false-match.
+function newNonce(): string {
+  return `${process.pid}-${Date.now()}-${++lockNonce}-${randomBytes(6).toString("hex")}`;
+}
 
 interface LockOwner {
   pid: number;
@@ -245,6 +253,82 @@ function holderAlive(owner: LockOwner): boolean {
   }
 }
 
+// Recover an abandoned lock WITHOUT ever clobbering one that was re-acquired between our inspection and
+// our removal (the steal-then-re-race TOCTOU). Recoverers are serialized behind a short-lived "steal
+// token"; once we hold it we RE-CONFIRM the main lock is still abandoned before removing it. While the
+// token is held and the (still-present) main lock blocks any openSync('wx'), no fresh lock can be
+// installed — so the owner we re-read is exactly the one we remove, and a lock re-acquired in the
+// meantime is seen as alive/fresh and left untouched. Returns true if we held the token and acted
+// (caller may retry immediately); false if another recoverer holds it (caller should back off).
+function recoverAbandonedLock(lockPath: string): boolean {
+  const stealPath = `${lockPath}.steal`;
+  const stealNonce = newNonce();
+  let sfd: number;
+  try {
+    sfd = openSync(stealPath, "wx");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") return false;
+    // Someone else is recovering. Reclaim the token only if it's provably orphaned — mirroring the main
+    // lock's own discipline: a SAME-HOST token is reclaimed ONLY when its holder pid is dead (never on
+    // time, so a merely-slow live recoverer is never stolen from → two recoverers can't both hold the
+    // token → the main-lock removal below can't race). Time is the fallback ONLY cross-host, where we
+    // can't check liveness. Single-winner via rename so two can't both take it.
+    const st = readLockOwner(stealPath);
+    let stAge = Infinity;
+    try {
+      stAge = Date.now() - statSync(stealPath).mtimeMs;
+    } catch {
+      return false; // vanished — retry the main lock
+    }
+    const stDead = st !== null && st.host === HOST && !holderAlive(st);
+    const stCrossStale = (st === null || st.host !== HOST) && stAge > STEAL_STALE_MS;
+    if (stDead || stCrossStale) {
+      try {
+        const claim = `${stealPath}.${process.pid}.reclaim`;
+        renameSync(stealPath, claim);
+        unlinkSync(claim);
+      } catch {
+        /* another recoverer won the reclaim, or it vanished — fine */
+      }
+    }
+    return false;
+  }
+  try {
+    writeSync(sfd, `${process.pid}\n${HOST}\n${stealNonce}`);
+    const owner = readLockOwner(lockPath);
+    if (owner === null) return true; // already gone
+    let ageMs = Infinity;
+    try {
+      ageMs = Date.now() - statSync(lockPath).mtimeMs;
+    } catch {
+      return true; // vanished — nothing to remove
+    }
+    const deadCrash = owner.host === HOST && !holderAlive(owner);
+    const crossHostStale = owner.host !== HOST && ageMs > HARD_STALE_MS;
+    if (deadCrash || crossHostStale) {
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        /* already gone — fine */
+      }
+    }
+    // else: a fresh, live (or no-longer-stale) lock was installed after our first inspection — leave it.
+    return true;
+  } finally {
+    try {
+      closeSync(sfd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const cur = readLockOwner(stealPath);
+      if (cur === null || cur.nonce === stealNonce) unlinkSync(stealPath);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // Serialize a read-modify-write on `path` across processes with an exclusive lockfile so two agents
 // appending (or a compact racing an append) can't lost-update each other.
 //
@@ -256,7 +340,7 @@ function holderAlive(owner: LockOwner): boolean {
 // rather than risk a steal.
 function withLock<T>(path: string, fn: () => T): T {
   const lockPath = `${path}.lock`;
-  const nonce = `${process.pid}-${Date.now()}-${++lockNonce}`;
+  const nonce = newNonce();
   const content = `${process.pid}\n${HOST}\n${nonce}`;
   const deadline = Date.now() + 15000;
   let fd: number;
@@ -275,14 +359,12 @@ function withLock<T>(path: string, fn: () => T): T {
       const deadCrash = owner !== null && owner.host === HOST && !holderAlive(owner);
       const crossHostStale = (owner === null || owner.host !== HOST) && ageMs > HARD_STALE_MS;
       if (deadCrash || crossHostStale) {
-        // Claim the abandoned lock atomically with rename — only ONE racing process can win the
-        // rename, so two stealers can't both proceed; then remove it and re-loop to openSync('wx').
-        try {
-          const claim = `${lockPath}.${process.pid}.steal`;
-          renameSync(lockPath, claim);
-          unlinkSync(claim);
-        } catch {
-          /* another process won the steal, or it already vanished — fine */
+        // Looks abandoned. Recover it safely (serialized + re-confirmed under a steal token) instead of a
+        // blind rename that could clobber a lock re-acquired since we inspected it. If another recoverer
+        // holds the token, back off and retry until the deadline.
+        if (!recoverAbandonedLock(lockPath)) {
+          if (Date.now() > deadline) throw new Error(`"${basename(path)}" is busy — another writer holds the lock (retry shortly)`);
+          sleepMs(50);
         }
         continue;
       }
@@ -336,12 +418,28 @@ function safeTruncate(s: string, max: number): string {
   return s.slice(0, end);
 }
 
+const SCAN_MAX_BYTES = 2_000_000; // bound stats/search reads so one oversized file can't OOM the process
+
+// Read at most SCAN_MAX_BYTES of a file (the prefix) so an accidentally-huge memory file can't exhaust
+// memory during a stats/search sweep. Stats/search are advisory, so a bounded prefix is acceptable.
+function readCappedUtf8(abs: string): string {
+  if (statSync(abs).size <= SCAN_MAX_BYTES) return readFileSync(abs, "utf8");
+  const fd = openSync(abs, "r");
+  try {
+    const buf = Buffer.alloc(SCAN_MAX_BYTES);
+    const n = readSync(fd, buf, 0, SCAN_MAX_BYTES, 0);
+    return buf.subarray(0, n).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function scanMemory(memDir: string): MemFile[] {
   const out: MemFile[] = [];
   for (const abs of walk(memDir)) {
     let content: string;
     try {
-      content = readFileSync(abs, "utf8");
+      content = readCappedUtf8(abs);
     } catch {
       continue; // unreadable/removed — don't let one file break stats or search
     }
@@ -444,7 +542,10 @@ export function renderCompact(memDir: string, opts: { keep?: number; budgetTok?:
         const team = basename(relative(memDir, join(logPath, "..")).split("\\").join("/")) || "team";
         const archivePath = join(logPath, "..", "log.archive.md");
         const existing = existsSync(archivePath) ? readFileSync(archivePath, "utf8") : archiveHeader(team);
-        const gap = existing.endsWith("\n") ? "" : "\n";
+        // The batch starts with a `### ` header, which parseLog only treats as an entry boundary when a
+        // BLANK line precedes it. Guarantee the archive ends with "\n\n" so the appended batch's first
+        // header isn't glued onto the previously-archived entry (would merge two entries; e.g. keep=0).
+        const gap = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
         // Archive first, then truncate the log — both atomic. If the process dies between the two, the
         // moved entries are safe in the archive and still in the log (a recoverable duplicate on the
         // next run), never lost.
@@ -555,13 +656,19 @@ export function renderIndex(memDir: string, write: boolean): string {
   const L: string[] = [];
   L.push("");
   if (write) {
-    const existing = existsSync(indexPath) ? readFileSync(indexPath, "utf8") : "# INDEX — the map of the team's shared memory\n";
-    const updated = upsertManagedBlock(existing, block);
-    if (updated === null) {
+    // Hold the lock across the read + splice + write so a concurrent `index --write` (or a human edit)
+    // can't last-writer-wins clobber INDEX.md — same discipline as append/compact.
+    const status = withLock(indexPath, (): "malformed" | "ok" => {
+      const existing = existsSync(indexPath) ? readFileSync(indexPath, "utf8") : "# INDEX — the map of the team's shared memory\n";
+      const updated = upsertManagedBlock(existing, block);
+      if (updated === null) return "malformed";
+      writeFileAtomic(indexPath, updated);
+      return "ok";
+    });
+    if (status === "malformed") {
       L.push(yellow("  ! INDEX.md has malformed `VENOM:BEGIN/END memory-catalog` markers — not writing (to avoid deleting hand-written content)."));
       L.push(dim("    Fix or remove the managed block by hand, then re-run `venom memory index --write`."));
     } else {
-      writeFileAtomic(indexPath, updated);
       L.push(green(`  ✓ Updated ${relative(process.cwd(), indexPath) || "INDEX.md"} — entry catalog refreshed.`));
     }
   } else {
@@ -647,7 +754,7 @@ export function searchMemory(memDir: string, query: string, opts: { limit?: numb
     if (category === "archive" && !opts.includeArchived) continue;
     let content: string;
     try {
-      content = readFileSync(abs, "utf8");
+      content = readCappedUtf8(abs);
     } catch {
       continue; // unreadable/removed mid-scan — skip, don't fail the whole search
     }

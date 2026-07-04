@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSy
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseLog, planCompact, buildCatalog } from "../dist/memory.js";
+import { parseLog, planCompact, buildCatalog, searchMemory } from "../dist/memory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(ROOT, "dist", "cli.js");
@@ -33,6 +33,24 @@ test("parseLog: byte-exact split (preamble + entries === content) and correct en
   assert.equal(preamble + entries.join(""), content, "reconstruction must be byte-identical");
   assert.ok(preamble.includes("append-only"), "preamble kept");
   assert.ok(entries[0].startsWith("### [2025-02-01"), "first entry starts at its header");
+});
+
+test("search/scan cap oversized files: a huge memory file is read only up to the 2MB cap (OOM guard)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "venom-cap-"));
+  try {
+    const mem = join(dir, "agent-memory", "dev");
+    execFileSync("mkdir", ["-p", mem]);
+    // marker near the top (within the cap), then >2MB of padding, then a marker past the cap
+    const head = "# dev — log\n\n---\n\n### [2025-01-01 09:00] developer-1 — alpheratzMarker\n- **Task:** top.\n";
+    const pad = "x".repeat(2_100_000);
+    writeFileSync(join(mem, "log.md"), `${head}\n${pad}\nbetelgeuseMarker past the cap\n`);
+    const near = searchMemory(dir + "/agent-memory", "alpheratzMarker", {});
+    assert.ok(near.length > 0, "a keyword within the 2MB cap is found");
+    const far = searchMemory(dir + "/agent-memory", "betelgeuseMarker", {});
+    assert.equal(far.length, 0, "content past the 2MB cap is not read (bounded) — OOM guard active");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("parseLog: a `###` header inside an HTML comment is NOT an entry (template example)", () => {
@@ -210,6 +228,28 @@ test("cli e2e: a second batch of entries archives in chronological order (never 
     assert.match(arch[0], /task 1\b/, "oldest archived first");
     assert.match(arch[arch.length - 1], /task 15\b/, "chronological order preserved");
     assert.equal(parseLog(readFileSync(logPath, "utf8")).entries.length, 10, "live log holds newest 10");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli e2e: compact --keep 0 archives everything and a second batch is not glued onto the last archived entry", () => {
+  const dir = mkdtempSync(join(tmpdir(), "venom-m3keep0-"));
+  try {
+    run(["init", "--dir", dir, "--tool", "claude-code", "--pack", "web-app", "--name", "K0", "--yes"]);
+    const logPath = join(dir, "agent-memory", "dev", "log.md");
+    const archivePath = join(dir, "agent-memory", "dev", "log.archive.md");
+
+    writeFileSync(logPath, mkLog(3));
+    run(["memory", "compact", "--dir", dir, "--keep", "0", "--write"]); // archive ALL 3; last entry ends in a single \n
+    assert.equal(parseLog(readFileSync(archivePath, "utf8")).entries.length, 3, "all 3 archived");
+
+    writeFileSync(logPath, mkLog(2)); // two fresh entries
+    run(["memory", "compact", "--dir", dir, "--keep", "0", "--write"]); // append the new batch to the archive
+
+    // If the batch's first `### ` header were glued onto the previous archived entry, this would be 4.
+    assert.equal(parseLog(readFileSync(archivePath, "utf8")).entries.length, 5, "3 + 2 archived — no boundary gluing");
+    assert.equal(parseLog(readFileSync(logPath, "utf8")).entries.length, 0, "keep=0 leaves the hot log empty");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
